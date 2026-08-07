@@ -1,0 +1,25 @@
+# Secrets — never commit. See .env.example for the required keys.
+.env
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Foundry build artefacts
+out/
+cache/
+
+# macOS
+.DS_Store
+
+# Deliberately NOT ignored (thesis reproducibility requires them in the repo):
+#   uv.lock            exact Python dependency pins
+#   soldeer.lock       exact Solidity dependency pins
+#   dependencies/      vendored Solidity deps, so a repo archive builds standalone
+#   bench/results/     measurement data — committed, never hand-edited
+#   broadcast/         Foundry deployment audit trail

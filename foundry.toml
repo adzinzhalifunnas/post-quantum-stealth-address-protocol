@@ -1,0 +1,38 @@
+# Repo-root layout: the three protocol packages each keep their own contracts/
+# directory, so Foundry must treat the whole repo as the source tree.
+# See CLAUDE.md, "Repo layout". Split into per-protocol profiles if this gets slow.
+[profile.default]
+src = "."
+test = "."
+script = "script"
+out = "out"
+libs = ["dependencies"]
+
+# Pinned for reproducibility: gas figures depend on the compiler and the
+# optimizer settings, so both are reported in the thesis methodology.
+solc = "0.8.28"
+evm_version = "prague"
+optimizer = true
+optimizer_runs = 200
+
+# Keep `test = "."` from collecting the vendored dependency tree's own tests.
+no_match_path = "dependencies/**"
+
+# Contract sizes and gas snapshots are regression aids only. Authoritative gas
+# numbers come from real testnet receipts (bench/gas.py) — Foundry's internal
+# metering excludes the 21k intrinsic cost and per-byte calldata cost, which is
+# exactly the component that differs between P1/P2/P3.
+gas_reports = ["*"]
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false
+
+[rpc_endpoints]
+eth_sepolia = "${ETH_SEPOLIA_RPC_URL}"
+base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
+
+[etherscan]
+eth_sepolia = {key = "${ETHERSCAN_API_KEY}", chain = 11155111}
+base_sepolia = {key = "${BASESCAN_API_KEY}", chain = 84532}

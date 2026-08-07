@@ -1,0 +1,82 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pqsap"
+version = "0.1.0"
+description = "EVM-compatible post-quantum stealth address protocol — thesis PoC"
+readme = "README.md"
+# 3.12 is pinned in .python-version. Ceiling is deliberate: coincurve / liboqs-python
+# wheel availability on 3.13+ must be verified before raising it.
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    # ML-KEM (FIPS 203) via the Open Quantum Safe C library. Requires the liboqs
+    # shared library on the system: `brew install liboqs` on macOS.
+    "liboqs-python==0.16.0",
+    # secp256k1 point arithmetic (libsecp256k1 bindings).
+    "coincurve>=21.0.0",
+    # Signing / ecrecover, keccak256, address checksumming.
+    "eth-account>=0.13.0",
+    "eth-utils>=5.0.0",
+    "eth-hash[pycryptodome]>=0.7.0",
+    # Chain access — used from M4 onward.
+    "web3>=7.0.0,<8",
+    # Benchmark aggregation and figures — used from M4 onward.
+    "pandas>=2.2.0",
+    "matplotlib>=3.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+    "black>=24.0.0",
+    "mypy>=1.11.0",
+    # Independent pure-Python ML-KEM (FIPS 203) implementation. Used only to
+    # cross-check that the liboqs backend implements *final* ML-KEM and not
+    # the round-3 Kyber draft, which has identical sizes but different output.
+    "kyber-py>=1.2.0",
+    "pandas-stubs",
+]
+
+# Every protocol package is mapped from its charter-mandated directory. Import
+# names are pqsap_core, p1_erc5564, p2_mlwe, p3_hybrid, bench — so `bench/` can
+# import all three schemes with no sys.path manipulation.
+[tool.hatch.build.targets.wheel]
+packages = [
+    "shared/pqsap_core",
+    "p1_erc5564",
+    "p2_mlwe",
+    "p3_hybrid",
+    "bench",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["shared", "p1_erc5564", "p2_mlwe", "p3_hybrid", "bench"]
+norecursedirs = ["dependencies", "out", "cache", "broadcast", "docs", "script", "bench/results", ".venv"]
+addopts = "-ra --strict-markers"
+markers = [
+    "slow: brute-force or large-sample tests (deselect with '-m \"not slow\"')",
+    "chain: requires an RPC endpoint or a local anvil node",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# liboqs-python and kyber-py ship no type stubs.
+[[tool.mypy.overrides]]
+module = ["oqs.*", "kyber_py.*", "coincurve.*"]
+ignore_missing_imports = true
