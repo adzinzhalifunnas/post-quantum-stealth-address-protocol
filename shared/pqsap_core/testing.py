@@ -15,7 +15,13 @@ from __future__ import annotations
 
 from pqsap_core import derive
 from pqsap_core.derive import DeriveError
-from pqsap_core.scheme import Announcement, RecipientKeys, StealthScheme, ViewingKeys
+from pqsap_core.scheme import (
+    Announcement,
+    NotEvmSpendable,
+    RecipientKeys,
+    StealthScheme,
+    ViewingKeys,
+)
 
 __all__ = [
     "check_address_derivation_is_shared",
@@ -83,7 +89,12 @@ def check_dual_key_separation(scheme: StealthScheme, samples: int = 5) -> None:
     try:
         scheme.recover_spend_key(viewer_only, matches[0])
     except Exception as exc:
-        assert isinstance(exc, DeriveError), f"{scheme.name}: unexpected error type {type(exc)}"
+        # DeriveError: no spending scalar was supplied (P1, P3).
+        # NotEvmSpendable: the protocol has no EVM spending key at all (P2) —
+        # a stronger form of the same guarantee.
+        assert isinstance(
+            exc, DeriveError | NotEvmSpendable
+        ), f"{scheme.name}: unexpected error type {type(exc)}"
     else:  # pragma: no cover - a failure here is a protocol break, not a flake
         raise AssertionError(f"{scheme.name}: viewing keys alone produced a spending key")
 

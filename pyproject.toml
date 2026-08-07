@@ -68,6 +68,11 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# Docstrings quote cryptographic notation from the cited papers and from FIPS
+# 203 verbatim — Greek letters, the concatenation operator, mathematical minus.
+# Transliterating them would corrupt a citation, so the ambiguous-character
+# rules are disabled rather than worked around.
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.black]
 line-length = 100

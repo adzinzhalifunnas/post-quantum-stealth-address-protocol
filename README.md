@@ -20,10 +20,6 @@ costs are directly comparable:
 The repository path contains spaces. Quote it in every shell command.
 
 ```bash
-brew install liboqs
-```
-
-```bash
 uv sync
 ```
 
@@ -31,13 +27,37 @@ uv sync
 versions from the committed `uv.lock`. Solidity tooling is Foundry; install it
 with `foundryup` if `forge --version` fails.
 
+### The liboqs shared library
+
+`liboqs-python` loads liboqs through `ctypes`, so it needs a **shared** library.
+Read that sentence carefully before reaching for Homebrew: `brew install liboqs`
+installs a static archive (`liboqs.a`) and nothing the Python wrapper can load.
+
+What actually happens on first import is that `liboqs-python` clones and builds
+liboqs itself into `~/_oqs`, producing `~/_oqs/lib/liboqs.dylib`. That build
+needs `cmake` and a working C toolchain. Verified working here with liboqs
+0.16.0 and liboqs-python 0.16.0.
+
+Two provenance notes for reproduction, both recorded in each run's metadata:
+the library that gets loaded lives outside this repository, and on this machine
+the resulting build links against Homebrew's `openssl@1.1`, which is
+end-of-life. Neither affects correctness of the ML-KEM output — the test suite
+verifies that independently, see below — but both belong in any description of
+the measurement environment.
+
 ### Verifying the ML-KEM backend
 
-The single most dangerous silent failure in this project is compiling against
-round-3 Kyber instead of final FIPS 203 ML-KEM: the two have identical key and
-ciphertext sizes but produce different output. `shared/pqsap_core/kem.py`
-asserts the mechanism name at load time, and the test suite cross-checks the
-liboqs backend against an independent pure-Python implementation.
+The single most dangerous silent failure available to this project is running
+against round-3 Kyber instead of final FIPS 203 ML-KEM. The two have identical
+key and ciphertext sizes and produce different output, so every size assertion
+in the thesis would still pass while the results were quietly wrong. This is not
+hypothetical: `Kyber768` is enabled in the same liboqs build as `ML-KEM-768`.
+
+Two independent guards. `shared/pqsap_core/kem.py` refuses to load a parameter
+set unless liboqs reports its algorithm version as `FIPS203`, and the test suite
+interoperates both directions with `kyber-py`, a separate pure-Python FIPS 203
+implementation — which is what actually proves the C backend is computing final
+ML-KEM rather than something the same shape.
 
 ```bash
 uv run python -c "import pqsap_core.kem as k; print(k.backend_info())"
