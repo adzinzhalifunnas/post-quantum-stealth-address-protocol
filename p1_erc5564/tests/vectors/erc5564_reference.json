@@ -1,0 +1,32 @@
+{
+  "provenance": {
+    "description": "Test vector for ERC-5564 scheme 1 (secp256k1 with view tags), transcribed from the executed cells of the EIP's own reference implementation notebook.",
+    "source_repo": "ethereum/ERCs",
+    "source_path": "assets/erc-5564/minimal_poc.ipynb",
+    "source_url": "https://github.com/ethereum/ERCs/blob/master/assets/erc-5564/minimal_poc.ipynb",
+    "blob_sha": "c7e589d14fc45b33be8fefbd5e27629fa8053c0c",
+    "last_commit": "e7bd101a83df54d0fbfc3c7656094ed263ba04f6",
+    "last_commit_date": "2023-11-24T19:44:42Z",
+    "retrieved": "2026-08-07",
+    "note": "ERC-5564 publishes no test-vector file. Its prose specifies neither the hash function nor the serialisation of the shared secret before hashing, so the reference notebook is the only authoritative source for those choices. The values below are the notebook's own inputs and its recorded outputs; every field marked expected_* is copied from a cell output, not recomputed by us.",
+    "notebook_conventions": {
+      "shared_secret_serialisation": "uncompressed coordinate pair, Q.x || Q.y, 32 bytes each, big-endian, no SEC1 prefix byte",
+      "hash": "keccak256 (via pysha3 sha3.keccak_256)",
+      "view_tag": "byte 0 of the keccak256 digest",
+      "stealth_pubkey": "P_spend + h*G, where h is the digest read as a big-endian integer",
+      "stealth_privkey": "p_spend + h. The notebook does not reduce mod n; for this vector the sum happens to be below n, so the two agree. We reduce mod n, which is required for correctness in general."
+    }
+  },
+  "vector": {
+    "ephemeral_priv_hex": "d952fe0740d9d14011fc8ead3ab7de3c739d3aa93ce9254c10b0134d80d26a30",
+    "view_priv": 2,
+    "spend_priv": 3,
+    "expected_shared_point_x": 65311808848028536848162101908966111079795231803322390815513763038079235257196,
+    "expected_shared_point_y": 43767810034999830518515787564234053904327508763526333662117780420755425490082,
+    "expected_view_tag": 86,
+    "expected_stealth_address": "0xfEd69Df0a27F1daE0D7430EAd82aaEdfAD6332bb",
+    "expected_stealth_priv": 39153944482575822531387237249775711740128993925789544779866399859639729033274,
+    "expected_stealth_pubkey_x": 67663851387124608323744162645277269585638670865381831245083336172545348387042,
+    "expected_stealth_pubkey_y": 80449904826544093817252981338261706033086352950841917067356875711772573870404
+  }
+}

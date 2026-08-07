@@ -27,9 +27,9 @@ import os
 import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from pqsap_core import derive, kem
+from pqsap_core import derive, kem, testing
 from pqsap_core.derive import SECP256K1_N, DeriveError
-from pqsap_core.scheme import Announcement, MetaAddress, RecipientKeys, ScanMatch, ViewingKeys
+from pqsap_core.scheme import Announcement, MetaAddress, ScanMatch
 
 from p3_hybrid.scheme import P3Hybrid
 
@@ -100,23 +100,16 @@ def test_full_roundtrip_ecrecover(scheme: P3Hybrid) -> None:
 
 def test_roundtrip_over_distinct_keypairs(scheme: P3Hybrid) -> None:
     """Charter requires >= 20 distinct keypairs; payloads must genuinely differ."""
-    metas: set[bytes] = set()
-    ciphertexts: set[bytes] = set()
+    testing.check_roundtrip(scheme, SAMPLES)
 
-    for _ in range(SAMPLES):
-        keys = scheme.keygen()
-        announcement = scheme.announce(keys.meta)
-        matches = scheme.scan(scheme.viewing_keys(keys), [announcement])
-        assert len(matches) == 1
 
-        p = scheme.recover_spend_key(keys, matches[0])
-        assert derive.eth_address(derive.pubkey_from_scalar(p)) == announcement.stealth_address
+def test_address_derivation_is_shared(scheme: P3Hybrid) -> None:
+    testing.check_address_derivation_is_shared(scheme)
 
-        metas.add(keys.meta.payload)
-        ciphertexts.add(announcement.payload)
 
-    assert len(metas) == SAMPLES
-    assert len(ciphertexts) == SAMPLES
+def test_announcement_shape(scheme: P3Hybrid) -> None:
+    keys = scheme.keygen()
+    testing.check_announcement_shape(scheme, scheme.announce(keys.meta))
 
 
 def test_seeded_keygen_is_reproducible(scheme: P3Hybrid) -> None:
@@ -131,9 +124,7 @@ def test_seeded_keygen_is_reproducible(scheme: P3Hybrid) -> None:
 
 def test_scan_ignores_foreign_announcements(scheme: P3Hybrid) -> None:
     """Announcements addressed to other people must not match."""
-    keys = scheme.keygen()
-    others = [scheme.announce(scheme.keygen().meta) for _ in range(50)]
-    assert scheme.scan(scheme.viewing_keys(keys), others) == []
+    testing.check_scan_rejects_foreign(scheme)
 
 
 def test_scan_finds_ours_among_foreign(scheme: P3Hybrid) -> None:
@@ -198,29 +189,17 @@ def test_dual_key_separation(scheme: P3Hybrid) -> None:
     Anyone 'simplifying' P3 to a single keypair breaks it, so it is asserted
     structurally: ViewingKeys has no field that could carry spend material.
     """
-    fields = set(ViewingKeys.__dataclass_fields__)
-    assert fields == {"meta", "view_secret"}
-    assert "spend_priv" not in fields
+    testing.check_dual_key_separation(scheme)
 
+    # P3-specific: the tweak h is fully known to a viewer, and is still useless
+    # without the spending scalar m. This is the property Q1 examines — a
+    # quantum adversary who recovers h from a *spent* address learns linkage,
+    # never custody.
     keys = scheme.keygen()
-    viewing = scheme.viewing_keys(keys)
-    announcements = [scheme.announce(keys.meta) for _ in range(5)]
-
-    # Enumeration: the viewer sees all of them.
-    matches = scheme.scan(viewing, announcements)
-    assert [m.index for m in matches] == list(range(5))
-    assert [m.stealth_address for m in matches] == [a.stealth_address for a in announcements]
-
-    # Spending: the viewer holds no spending scalar, and the scheme refuses to
-    # invent one from viewing material alone.
-    viewer_keys = RecipientKeys(meta=viewing.meta, spend_priv=None, view_secret=viewing.view_secret)
-    with pytest.raises(DeriveError):
-        scheme.recover_spend_key(viewer_keys, matches[0])
-
-    # The tweak h is public to the viewer, and is useless without m.
-    tweak = matches[0].tweak
-    assert tweak is not None
-    assert derive.eth_address(derive.pubkey_from_scalar(tweak)) != matches[0].stealth_address
+    announcement = scheme.announce(keys.meta)
+    match = scheme.scan(scheme.viewing_keys(keys), [announcement])[0]
+    assert match.tweak is not None
+    assert derive.eth_address(derive.pubkey_from_scalar(match.tweak)) != match.stealth_address
 
 
 def test_recover_rejects_zero_stealth_key(scheme: P3Hybrid) -> None:
