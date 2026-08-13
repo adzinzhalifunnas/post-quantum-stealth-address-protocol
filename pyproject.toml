@@ -39,6 +39,7 @@ dev = [
     # the round-3 Kyber draft, which has identical sizes but different output.
     "kyber-py>=1.2.0",
     "pandas-stubs",
+    "pytest-cov>=7.1.0",
 ]
 
 # Every protocol package is mapped from its charter-mandated directory. Import

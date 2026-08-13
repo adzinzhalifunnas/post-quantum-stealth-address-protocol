@@ -169,6 +169,29 @@ def test_non_commitment_targets_register_the_full_meta() -> None:
         assert gas.registry_payload(target, keys) == keys.meta.payload
 
 
+def test_funder_refuses_to_run_without_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing key must fail with instructions, not a stack trace."""
+    from pqsap_core.chain import Network
+
+    monkeypatch.delenv("DEPLOYER_PRIVATE_KEY", raising=False)
+    with pytest.raises(ChainError, match="DEPLOYER_PRIVATE_KEY"):
+        gas._funder(None, Network("eth_sepolia", 11155111, "X"))  # type: ignore[arg-type]
+
+
+def test_local_chain_uses_flat_funding() -> None:
+    """Anvil skips the estimate-and-sweep ceremony; its currency is worthless."""
+    from pqsap_core.chain import Network
+
+    amount = gas._sample_funding(None, Network("anvil", 31337, "X", is_local=True), "0x0")  # type: ignore[arg-type]
+    assert amount == gas.LOCAL_FUNDING_WEI
+
+
+def test_calldata_of_accepts_both_hex_and_bytes() -> None:
+    assert gas._calldata_of({"data": "0xdeadbeef"}) == b"\xde\xad\xbe\xef"
+    assert gas._calldata_of({"data": b"\xde\xad"}) == b"\xde\xad"
+    assert gas._calldata_of({}) == b""
+
+
 def test_calldata_floor_matches_eip7623() -> None:
     """The floor is 21,000 plus ten gas per token, a token being one zero byte
     or a quarter of a non-zero byte."""

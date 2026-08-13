@@ -8,6 +8,9 @@ agreeing with its own simulation.
 
 from __future__ import annotations
 
+import csv
+from pathlib import Path
+
 import pytest
 
 from bench import anonymity, curves, scan
@@ -77,6 +80,134 @@ class TestCurves:
     def test_equal_announcements_never_cross(self) -> None:
         assert (
             curves.crossing(self._variant(100_000, 50_000), self._variant(200_000, 50_000)) is None
+        )
+
+
+class TestLoadVariants:
+    """Reading measured CSVs into the cost model — where a bug would silently
+    rewrite the headline."""
+
+    def _write(self, path: Path, rows: list[tuple[str, str, str, str, str, int]]) -> None:
+        with path.open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                [
+                    "protocol",
+                    "param_set",
+                    "operation",
+                    "registry_variant",
+                    "announcer_variant",
+                    "gas_used",
+                ]
+            )
+            writer.writerows(rows)
+
+    def test_composes_the_full_cross_product(self, tmp_path: Path) -> None:
+        """Two registry variants and two announcers give four configurations,
+        even though only two pairs were ever sent."""
+        path = tmp_path / "gas.csv"
+        self._write(
+            path,
+            [
+                ("p3_hybrid", "mlkem768", "register", "R1", "A1", 941_744),
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 115_264),
+                ("p3_hybrid", "mlkem768", "announce", "R1", "A1", 67_730),
+                ("p3_hybrid", "mlkem768", "announce", "R3", "A2", 67_000),
+            ],
+        )
+        variants = curves.load_variants(path)
+        labels = {(v.registry_variant, v.announcer_variant) for v in variants}
+        assert labels == {("R1", "A1"), ("R1", "A2"), ("R3", "A1"), ("R3", "A2")}
+
+    def test_takes_the_median_of_each_leg(self, tmp_path: Path) -> None:
+        path = tmp_path / "gas.csv"
+        self._write(
+            path,
+            [
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 95_340),
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 115_264),
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 115_264),
+                ("p3_hybrid", "mlkem768", "announce", "R3", "A2", 67_000),
+            ],
+        )
+        assert curves.load_variants(path)[0].registration_gas == 115_264
+
+    def test_never_mixes_parameter_sets(self, tmp_path: Path) -> None:
+        """768 and 512 are different configurations, not samples of one."""
+        path = tmp_path / "gas.csv"
+        self._write(
+            path,
+            [
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 115_264),
+                ("p3_hybrid", "mlkem512", "register", "R3", "A2", 115_264),
+                ("p3_hybrid", "mlkem768", "announce", "R3", "A2", 67_000),
+                ("p3_hybrid", "mlkem512", "announce", "R3", "A2", 54_200),
+            ],
+        )
+        by_params = {v.param_set: v for v in curves.load_variants(path)}
+        assert by_params["mlkem768"].announcement_gas == 67_000
+        assert by_params["mlkem512"].announcement_gas == 54_200
+
+    def test_rows_without_gas_are_skipped(self, tmp_path: Path) -> None:
+        path = tmp_path / "gas.csv"
+        self._write(
+            path,
+            [
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 115_264),
+                ("p3_hybrid", "mlkem768", "announce", "R3", "A2", 67_000),
+            ],
+        )
+        with path.open("a") as handle:
+            handle.write("p3_hybrid,mlkem768,register,R3,A2,\n")
+        assert curves.load_variants(path)[0].registration_gas == 115_264
+
+    def test_cumulative_tabulates_every_variant_at_every_point(self, tmp_path: Path) -> None:
+        path = tmp_path / "gas.csv"
+        self._write(
+            path,
+            [
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 100_000),
+                ("p3_hybrid", "mlkem768", "announce", "R3", "A2", 50_000),
+            ],
+        )
+        rows = curves.cumulative(curves.load_variants(path), [0, 1, 10])
+        assert [r["cumulative_gas"] for r in rows] == [100_000, 150_000, 600_000]
+
+
+class TestMeasureScan:
+    """The scan measurement itself, on a small population for speed."""
+
+    def test_finds_exactly_the_planted_payments(self) -> None:
+        from p3_hybrid.scheme import P3Hybrid
+
+        result = scan.measure_scan(P3Hybrid(), "A1", announcements=200, planted=3, repeats=1)
+        assert result.matches_found == 3
+        assert result.announcements == 200
+
+    def test_one_shared_secret_operation_per_announcement(self) -> None:
+        """The view tag saves elliptic-curve work, never decapsulation."""
+        from p3_hybrid.scheme import P3Hybrid
+
+        result = scan.measure_scan(P3Hybrid(), "A1", announcements=200, planted=2, repeats=1)
+        assert result.shared_secret_ops == 200
+        # Only ~1/256 survive the tag, plus the planted matches.
+        assert result.address_checks < 20
+
+    def test_p2_reports_no_evm_address_checks(self) -> None:
+        """P2 has no elliptic-curve step at all — its stealth key is a lattice."""
+        from p2_mlwe.scheme import P2Mlwe
+
+        result = scan.measure_scan(P2Mlwe(), "A1", announcements=100, planted=2, repeats=1)
+        assert result.address_checks == 0
+        assert result.matches_found == 2
+
+    def test_timing_is_positive_and_per_announcement_is_derived(self) -> None:
+        from p1_erc5564.scheme import P1Erc5564
+
+        result = scan.measure_scan(P1Erc5564(), "A1", announcements=100, planted=1, repeats=1)
+        assert result.wall_clock_s > 0
+        assert result.per_announcement_us == pytest.approx(
+            result.wall_clock_s / 100 * 1e6, rel=0.01
         )
 
 

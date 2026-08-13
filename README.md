@@ -78,12 +78,38 @@ uv run python -c "import pqsap_core.kem as k; print(k.backend_info())"
 
 ## Running
 
+The default suite is offline and needs no chain.
+
 ```bash
 uv run pytest
 ```
 
 ```bash
-forge build
+forge test
+```
+
+Chain-dependent tests are marked `chain` and skip themselves when no anvil is
+listening. They cover the parts of `chain.py` that need a node, and run the
+whole pipeline — deploy, measure, checkpoint, analyse, report — as one unit.
+They deliberately declare anvil *non-local*, which forces the branches that
+otherwise first execute on a testnet with real funds behind them.
+
+```bash
+anvil &
+```
+
+```bash
+forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+```
+
+```bash
+uv run pytest -m chain
+```
+
+Coverage, if you want to see what is not exercised:
+
+```bash
+uv run pytest --cov=pqsap_core --cov=p1_erc5564 --cov=p2_mlwe --cov=p3_hybrid --cov=bench --cov-report=term-missing
 ```
 
 ## Layout
