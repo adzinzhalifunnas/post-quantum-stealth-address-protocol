@@ -79,6 +79,8 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 [tool.black]
 line-length = 100
 target-version = ["py311"]
+# Vendored Solidity dependencies ship their own Python tooling; not ours to format.
+extend-exclude = '''/(dependencies|out|cache|broadcast|\.venv)/'''
 
 [tool.mypy]
 python_version = "3.12"
