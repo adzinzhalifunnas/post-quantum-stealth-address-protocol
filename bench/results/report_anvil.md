@@ -1,6 +1,6 @@
 # PQ-SAP measurement report — anvil
 
-Generated from `bench/results/` at commit `d6f8e309ed05`. Every figure traces to a CSV row; nothing here is recomputed or adjusted.
+Generated from `bench/results/` at commit `baed80940fe7`. Every figure traces to a CSV row; nothing here is recomputed or adjusted.
 
 > **These are local-chain measurements.** Gas *units* are deterministic and will reproduce on any chain running the same EVM version, so the comparisons below stand. Fee columns — and in particular Base Sepolia's separate L1 data fee — require the testnet runs and are not yet filled in.
 
@@ -13,8 +13,40 @@ Generated from `bench/results/` at commit `d6f8e309ed05`. Every figure traces to
 - Machine: macOS-26.5.2-arm64-arm-64bit, Python 3.12.11
 - Samples per target: 20
 - Measurement timestamp: 2026-08-13T16:12:46.250399+00:00
+- ⚠️ The working tree has moved on since these numbers were taken. Re-run `bench.gas` before quoting them if any contract changed.
 
-## 1. Sizes
+## 1. The three protocols, head to head
+
+P2 and P3 are both shown at ML-KEM-768, so a security-level difference is never mistaken for a design difference. P3 appears twice because the optimisation is the artifact.
+
+| | P1 ERC-5564 | P2 MLWE | P3 naive (R1+A1) | P3 optimised (R3+A2) |
+|---|---|---|---|---|
+| **Meta-address registered** | 66 B | 2,368 B | 1,217 B | 65 B |
+| **Announcement payload** | 33 B | 1,088 B | 1,088 B | 1,088 B |
+| **Registration gas** | 115,316 | 1,745,658 | 941,744 | 115,264 |
+| **Announcement gas** | 28,067 | 67,730 | 67,700 | 66,970 |
+| Cumulative at k=1 | 0.143M | 1.813M | 1.009M | 0.182M |
+| Cumulative at k=10 | 0.396M | 2.423M | 1.619M | 0.785M |
+| Cumulative at k=100 | 2.922M | 8.519M | 7.712M | 6.812M |
+| Crossover (payments) | 13.3 | 36.9 | 19.7 | 2.1 |
+| Scan time per announcement | 30.71 µs | 28.23 µs | 29.28 µs | 28.20 µs |
+| Scan bytes per announcement | 224 B | 1,248 B | 1,248 B | 1,284 B |
+| Scan RPC round trips | 0 | 0 | 0 | 1 |
+
+Qualitative properties, from the protocol definitions:
+
+| | P1 ERC-5564 | P2 MLWE | P3 hybrid |
+|---|---|---|---|
+| Unlinkability basis | secp256k1 ECDH | Module-LWE (ML-KEM) | Module-LWE (ML-KEM) |
+| Custody basis | secp256k1 ECDSA | Module-LWE | secp256k1 ECDSA |
+| Lattice keypairs per recipient | 0 | 2 | 1 |
+| Resists harvest-now-decrypt-later | no | yes | yes |
+| Spendable on unmodified EVM | yes | **no** | yes |
+| Dual-key separation (view ≠ spend) | yes | yes | yes |
+| Quantum leak once an address spends | total | none | partial (Q1) |
+| ERC-5564 scheme id | 1 (standard) | 0x4D4C5745 (ours) | 0x50513348 (ours) |
+
+## 2. Sizes
 
 Byte counts drive everything else. All are read from liboqs at runtime, never hardcoded.
 
@@ -26,7 +58,7 @@ Byte counts drive everything else. All are read from liboqs at runtime, never ha
 | p3_hybrid | mlkem768 | 1,217 B | 1,088 B | 40 |
 | p3_hybrid | mlkem512 | 833 B | 768 B | 28 |
 
-## 2. Measured gas
+## 3. Measured gas
 
 Medians over 20 fresh keypairs and 20 fresh EOAs per variant. First registrations only, so every storage slot written is cold.
 
@@ -44,7 +76,7 @@ Medians over 20 fresh keypairs and 20 fresh EOAs per variant. First registration
 | p3_hybrid | mlkem768 | R3 | A1 | 115,264 | 67,700 |
 | p3_hybrid | mlkem768 | R3 | A2 | 115,264 | 66,970 |
 
-## 3. Cost ratios and crossover
+## 4. Cost ratios and crossover
 
 Crossover is the payment count at which cumulative announcements overtake registration, net of the 21,000 gas intrinsic transaction cost.
 
@@ -62,7 +94,7 @@ Crossover is the payment count at which cumulative announcements overtake regist
 | p3_hybrid/mlkem768/R3+A1 | 1.00x | 2.41x | 2.0 |
 | p3_hybrid/mlkem768/R3+A2 | 1.00x | 2.39x | 2.1 |
 
-## 4. Cumulative cost
+## 5. Cumulative cost
 
 Total gas after k payments, including registration. This is the headline: which protocol is cheaper depends on how many payments a recipient receives.
 
@@ -80,7 +112,7 @@ Total gas after k payments, including registration. This is the headline: which 
 | p3_hybrid/mlkem768/R3+A1 | 0.183M | 0.792M | 3.500M | 6.885M |
 | p3_hybrid/mlkem768/R3+A2 | 0.182M | 0.785M | 3.464M | 6.812M |
 
-## 5. Receiver scan cost (Q3)
+## 6. Receiver scan cost (Q3)
 
 | Protocol | Params | Announcer | µs/announcement | Bytes/announcement | RPC trips |
 |---|---|---|---|---|---|
@@ -92,7 +124,7 @@ Total gas after k payments, including registration. This is the headline: which 
 | p3_hybrid | mlkem512 | A1 | 23.31 | 928 | 0.0 |
 | p3_hybrid | mlkem512 | A2 | 22.11 | 964 | 1.0 |
 
-## 6. Anonymity under a quantum adversary (Q1)
+## 7. Anonymity under a quantum adversary (Q1)
 
 Anonymity set for a **spent** P3 address under a quantum adversary (ECDLP broken, ML-KEM intact), at the deployed 8-bit view tag:
 

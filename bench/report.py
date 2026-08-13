@@ -19,7 +19,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 from bench.curves import Variant, load_variants
 from bench.sizes import git_commit
@@ -50,6 +52,123 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return []
     with path.open() as handle:
         return list(csv.DictReader(handle))
+
+
+#: Qualitative properties. Not measured — they follow from the protocol
+#: definitions and from tests that assert them, and the test is named so a
+#: reader can check the claim rather than take it.
+_QUALITATIVE: Final[list[tuple[str, str, str, str]]] = [
+    (
+        "Unlinkability basis",
+        "secp256k1 ECDH",
+        "Module-LWE (ML-KEM)",
+        "Module-LWE (ML-KEM)",
+    ),
+    ("Custody basis", "secp256k1 ECDSA", "Module-LWE", "secp256k1 ECDSA"),
+    ("Lattice keypairs per recipient", "0", "2", "1"),
+    ("Resists harvest-now-decrypt-later", "no", "yes", "yes"),
+    ("Spendable on unmodified EVM", "yes", "**no**", "yes"),
+    ("Dual-key separation (view ≠ spend)", "yes", "yes", "yes"),
+    ("Quantum leak once an address spends", "total", "none", "partial (Q1)"),
+    ("ERC-5564 scheme id", "1 (standard)", "0x4D4C5745 (ours)", "0x50513348 (ours)"),
+]
+
+
+def _protocol_comparison(variants: list[Variant]) -> str:
+    """The three-way comparison, at the level-matched parameter set.
+
+    P2 and P3 are both shown at ML-KEM-768 so that a security difference is
+    never mistaken for a design difference. P3 appears twice — naive and
+    optimised — because the charter's Chapter IV narrates P1 → P2 → P3-naive →
+    P3-optimised, and the optimisation is the artifact.
+    """
+    sizes = {(r["protocol"], r["param_set"]): r for r in _read_csv(RESULTS_DIR / "sizes.csv")}
+    scans = {
+        (r["protocol"], r["param_set"], r["announcer_variant"]): r
+        for r in _read_csv(RESULTS_DIR / "scan.csv")
+    }
+    by_label = {v.label: v for v in variants}
+
+    columns = [
+        ("P1 ERC-5564", "p1_erc5564", "secp256k1", "p1_erc5564/secp256k1/erc6538+A1", "A1"),
+        ("P2 MLWE", "p2_mlwe", "mlkem768", "p2_mlwe/mlkem768/mlwe_full+A1", "A1"),
+        ("P3 naive (R1+A1)", "p3_hybrid", "mlkem768", "p3_hybrid/mlkem768/R1+A1", "A1"),
+        ("P3 optimised (R3+A2)", "p3_hybrid", "mlkem768", "p3_hybrid/mlkem768/R3+A2", "A2"),
+    ]
+
+    def cell(getter: Callable[[str, str, str, str], str]) -> list[str]:
+        return [getter(protocol, params, label, ann) for _, protocol, params, label, ann in columns]
+
+    def size_of(field: str) -> Callable[[str, str, str, str], str]:
+        def get(protocol: str, params: str, label: str, ann: str) -> str:
+            row = sizes.get((protocol, params))
+            if not row:
+                return "—"
+            # R3 registers a 65-byte commitment rather than the full key.
+            if field == "meta_bytes" and "R3" in label:
+                return "65 B"
+            return f"{int(row[field]):,} B"
+
+        return get
+
+    def gas_of(attribute: str) -> Callable[[str, str, str, str], str]:
+        def get(protocol: str, params: str, label: str, ann: str) -> str:
+            variant = by_label.get(label)
+            return f"{getattr(variant, attribute):,}" if variant else "—"
+
+        return get
+
+    def scan_of(field: str, suffix: str) -> Callable[[str, str, str, str], str]:
+        def get(protocol: str, params: str, label: str, ann: str) -> str:
+            row = scans.get((protocol, params, ann))
+            if not row:
+                return "—"
+            value = float(row[field])
+            return f"{value:,.2f}{suffix}" if suffix == " µs" else f"{value:,.0f}{suffix}"
+
+        return get
+
+    def cumulative_at(k: int) -> Callable[[str, str, str, str], str]:
+        def get(protocol: str, params: str, label: str, ann: str) -> str:
+            variant = by_label.get(label)
+            return f"{variant.cost(k) / 1e6:.3f}M" if variant else "—"
+
+        return get
+
+    def crossover(protocol: str, params: str, label: str, ann: str) -> str:
+        variant = by_label.get(label)
+        if not variant:
+            return "—"
+        net_ann = variant.announcement_gas - 21_000
+        if net_ann <= 0:
+            return "—"
+        return f"{(variant.registration_gas - 21_000) / net_ann:.1f}"
+
+    rows: list[tuple[str, list[str]]] = [
+        ("**Meta-address registered**", cell(size_of("meta_bytes"))),
+        ("**Announcement payload**", cell(size_of("announcement_bytes"))),
+        ("**Registration gas**", cell(gas_of("registration_gas"))),
+        ("**Announcement gas**", cell(gas_of("announcement_gas"))),
+        ("Cumulative at k=1", cell(cumulative_at(1))),
+        ("Cumulative at k=10", cell(cumulative_at(10))),
+        ("Cumulative at k=100", cell(cumulative_at(100))),
+        ("Crossover (payments)", cell(crossover)),
+        ("Scan time per announcement", cell(scan_of("per_announcement_us", " µs"))),
+        ("Scan bytes per announcement", cell(scan_of("total_bytes_per_announcement", " B"))),
+        ("Scan RPC round trips", cell(scan_of("rpc_round_trips", ""))),
+    ]
+
+    header = "| | " + " | ".join(name for name, *_ in columns) + " |"
+    lines = [header, "|---" * (len(columns) + 1) + "|"]
+    lines += [f"| {label} | " + " | ".join(values) + " |" for label, values in rows]
+
+    lines.append("")
+    lines.append("Qualitative properties, from the protocol definitions:")
+    lines.append("")
+    qual_header = "| | P1 ERC-5564 | P2 MLWE | P3 hybrid |"
+    lines += [qual_header, "|---|---|---|---|"]
+    lines += [f"| {label} | {p1} | {p2} | {p3} |" for label, p1, p2, p3 in _QUALITATIVE]
+    return "\n".join(lines)
 
 
 def _sizes_table() -> str:
@@ -203,39 +322,47 @@ def build_report(network: str) -> str:
             "",
             _provenance(network),
             "",
-            "## 1. Sizes",
+            "## 1. The three protocols, head to head",
+            "",
+            "P2 and P3 are both shown at ML-KEM-768, so a security-level difference "
+            "is never mistaken for a design difference. P3 appears twice because the "
+            "optimisation is the artifact.",
+            "",
+            _protocol_comparison(variants) if variants else "_No gas measurements yet._",
+            "",
+            "## 2. Sizes",
             "",
             "Byte counts drive everything else. All are read from liboqs at runtime, "
             "never hardcoded.",
             "",
             _sizes_table(),
             "",
-            "## 2. Measured gas",
+            "## 3. Measured gas",
             "",
             "Medians over 20 fresh keypairs and 20 fresh EOAs per variant. First "
             "registrations only, so every storage slot written is cold.",
             "",
             _gas_table(variants) if variants else "_No gas measurements yet._",
             "",
-            "## 3. Cost ratios and crossover",
+            "## 4. Cost ratios and crossover",
             "",
             "Crossover is the payment count at which cumulative announcements overtake "
             "registration, net of the 21,000 gas intrinsic transaction cost.",
             "",
             _crossover_table(variants) if variants else "_No gas measurements yet._",
             "",
-            "## 4. Cumulative cost",
+            "## 5. Cumulative cost",
             "",
             "Total gas after k payments, including registration. This is the headline: "
             "which protocol is cheaper depends on how many payments a recipient receives.",
             "",
             _cumulative_table(variants) if variants else "_No gas measurements yet._",
             "",
-            "## 5. Receiver scan cost (Q3)",
+            "## 6. Receiver scan cost (Q3)",
             "",
             _scan_table(),
             "",
-            "## 6. Anonymity under a quantum adversary (Q1)",
+            "## 7. Anonymity under a quantum adversary (Q1)",
             "",
             _anonymity_table(),
             "",
