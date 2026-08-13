@@ -59,6 +59,10 @@ P3_SCHEME_ID: Final[int] = 0x50513348
 
 _SPEND_PUBKEY_BYTES: Final[int] = 33
 
+#: R3 registers M plus a 32-byte keccak commitment to ek_view. 65 bytes total,
+#: against ERC-6538's 66 — the same storage-slot count, which is the point.
+_COMMITMENT_PAYLOAD_BYTES: Final[int] = _SPEND_PUBKEY_BYTES + 32
+
 # Domain separators for deriving reproducible keys from one benchmark seed.
 _KDF_SPEND: Final[bytes] = b"pqsap/p3/spend"
 _KDF_KEM_0: Final[bytes] = b"pqsap/p3/kem/0"
@@ -161,6 +165,48 @@ class P3Hybrid(StealthScheme):
         if match.tweak is None:
             raise DeriveError("match carries no tweak; cannot recover a spending key")
         return derive.derive_stealth_privkey(keys.spend_priv, match.tweak)
+
+    def commitment_payload(self, meta: MetaAddress) -> bytes:
+        """R3's registration payload: ``M ‖ keccak256(ek_view)``, 65 bytes.
+
+        The encapsulation key stays off-chain; only a binding commitment to it
+        is registered. 65 bytes against ERC-6538's 66 means the same number of
+        storage slots, which is the parity hypothesis the thesis tests.
+        """
+        spend_pub, ek_view = self.split_meta(meta)
+        return spend_pub + derive.keccak256(ek_view)
+
+    def verify_commitment(self, commitment: bytes, ek_view: bytes) -> bool:
+        """Check an off-chain-served ``ek_view`` against its on-chain commitment.
+
+        A sender **must** call this before encapsulating. Without it, whoever
+        serves the key can substitute their own and read every payment — the
+        commitment is the only thing binding the served key to the recipient.
+        """
+        if len(commitment) != _COMMITMENT_PAYLOAD_BYTES:
+            raise DeriveError(
+                f"commitment payload must be {_COMMITMENT_PAYLOAD_BYTES} bytes, "
+                f"got {len(commitment)}"
+            )
+        if len(ek_view) != self.spec.ek_len:
+            return False
+        expected = commitment[_SPEND_PUBKEY_BYTES:]
+        # Not a timing-sensitive comparison: both sides are public values.
+        return derive.keccak256(ek_view) == expected
+
+    def meta_from_commitment(self, commitment: bytes, ek_view: bytes) -> MetaAddress:
+        """Rebuild the full meta-address from a commitment and a served key.
+
+        Raises:
+            DeriveError: if the served key does not match the commitment, which
+                means it is not the recipient's and must not be used.
+        """
+        if not self.verify_commitment(commitment, ek_view):
+            raise DeriveError(
+                "served ek_view does not match the on-chain commitment; refusing to "
+                "encapsulate to a key that may not belong to the recipient"
+            )
+        return MetaAddress(self.scheme_id, commitment[:_SPEND_PUBKEY_BYTES] + ek_view)
 
     def split_meta(self, meta: MetaAddress) -> tuple[bytes, bytes]:
         """Split a registered meta-address into ``(M, ek_view)``."""

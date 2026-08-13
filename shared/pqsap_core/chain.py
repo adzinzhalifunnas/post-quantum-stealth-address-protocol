@@ -35,6 +35,7 @@ __all__ = [
     "NETWORKS",
     "ChainError",
     "Network",
+    "calldata_floor",
     "connect",
     "fund_account",
     "gas_price_now",
@@ -199,6 +200,32 @@ def receipt_costs(receipt: dict[str, Any], net: Network) -> dict[str, int | None
 def fund_account(w3: Web3, funder: LocalAccount, recipient: str, amount_wei: int) -> None:
     """Send native currency from the funder to a fresh sample account."""
     send(w3, funder, {"to": recipient, "value": Wei(amount_wei)})
+
+
+#: EIP-7623 (Prague / Pectra). A transaction pays at least a floor derived from
+#: its calldata alone: every zero byte counts as one token, every non-zero byte
+#: as four, and the floor is 21,000 plus ten gas per token. Below that floor,
+#: execution gas — including log data — is effectively free.
+_STANDARD_TOKEN_COST: Final[int] = 4
+_TOTAL_COST_FLOOR_PER_TOKEN: Final[int] = 10
+
+
+def calldata_floor(data: bytes) -> tuple[int, int]:
+    """EIP-7623 token count and floor gas for a transaction's calldata.
+
+    This matters more than it sounds. Announcements in this study are large and
+    computationally trivial, so they sit *on* the floor rather than above it —
+    which means optimisations that reduce execution gas, such as emitting a
+    smaller log, buy nothing at all. Only reducing calldata reduces cost.
+    Recording the floor per row is what lets a reader see that from the data
+    instead of taking it on trust.
+
+    Returns:
+        ``(tokens, floor_gas)``.
+    """
+    zero_bytes = data.count(0)
+    tokens = zero_bytes + (len(data) - zero_bytes) * _STANDARD_TOKEN_COST
+    return tokens, 21_000 + tokens * _TOTAL_COST_FLOOR_PER_TOKEN
 
 
 def gas_price_now(w3: Web3) -> int:

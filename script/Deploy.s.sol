@@ -6,6 +6,8 @@ import {console2} from "forge-std/console2.sol";
 import {StealthAnnouncer} from "../shared/contracts/StealthAnnouncer.sol";
 import {ERC6538Registry} from "../p1_erc5564/contracts/ERC6538Registry.sol";
 import {MLWERegistry} from "../p2_mlwe/contracts/MLWERegistry.sol";
+import {AnnouncerMinLog} from "../p3_hybrid/contracts/AnnouncerMinLog.sol";
+import {RegistryCommit} from "../p3_hybrid/contracts/RegistryCommit.sol";
 import {RegistryFull} from "../p3_hybrid/contracts/RegistryFull.sol";
 
 /// @title Deploy
@@ -24,21 +26,15 @@ import {RegistryFull} from "../p3_hybrid/contracts/RegistryFull.sol";
 ///      deployment audit trail, and `bench/` reads contract addresses from it,
 ///      so results can always be traced back to specific deployed bytecode.
 contract Deploy is Script {
-    function run()
-        external
-        returns (
-            StealthAnnouncer announcer,
-            ERC6538Registry p1Registry,
-            MLWERegistry p2Registry,
-            RegistryFull p3RegistryFull
-        )
-    {
+    function run() external {
         vm.startBroadcast();
 
-        announcer = new StealthAnnouncer();
-        p1Registry = new ERC6538Registry();
-        p2Registry = new MLWERegistry();
-        p3RegistryFull = new RegistryFull();
+        StealthAnnouncer announcer = new StealthAnnouncer();
+        ERC6538Registry p1Registry = new ERC6538Registry();
+        MLWERegistry p2Registry = new MLWERegistry();
+        RegistryFull p3RegistryFull = new RegistryFull();
+        RegistryCommit p3RegistryCommit = new RegistryCommit();
+        AnnouncerMinLog p3AnnouncerMinLog = new AnnouncerMinLog();
 
         vm.stopBroadcast();
 
@@ -47,5 +43,7 @@ contract Deploy is Script {
         console2.log("ERC6538Registry   ", address(p1Registry));
         console2.log("MLWERegistry      ", address(p2Registry));
         console2.log("RegistryFull      ", address(p3RegistryFull));
+        console2.log("RegistryCommit    ", address(p3RegistryCommit));
+        console2.log("AnnouncerMinLog   ", address(p3AnnouncerMinLog));
     }
 }

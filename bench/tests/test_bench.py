@@ -100,16 +100,82 @@ def test_measurement_grid_covers_all_three_protocols() -> None:
 
 
 def test_every_target_names_a_real_registry_contract() -> None:
-    expected = {"ERC6538Registry", "MLWERegistry", "RegistryFull"}
+    expected = {"ERC6538Registry", "MLWERegistry", "RegistryFull", "RegistryCommit"}
     assert {t.registry_contract for t in gas.targets()} <= expected
 
 
-def test_all_targets_share_one_announcer() -> None:
-    """The announcer is the control variable; M4 measures no variant of it."""
-    assert {t.announcer_variant for t in gas.targets()} == {"A1"}
+def test_only_p3_departs_from_the_shared_announcer() -> None:
+    """The shared announcer stays the control variable.
+
+    A2 is an object of study belonging to P3, measured *against* the shared
+    announcer. If P1 or P2 ever announced through anything else, the per-payment
+    comparison between protocols would stop meaning anything.
+    """
+    for target in gas.targets():
+        if target.scheme.name == "p3_hybrid":
+            continue
+        assert target.announcer_variant == "A1"
+        assert target.announcer_contract == "StealthAnnouncer"
+
+    assert {t.announcer_variant for t in gas.targets()} == {"A1", "A2"}
 
 
-def _row(protocol: str, operation: str, gas_used: int) -> gas.GasRow:
+def test_grid_covers_every_variant_at_least_once() -> None:
+    """Registration and announcement are independent, so each variant needs to
+    appear once; `crossover` composes the rest of the cross product."""
+    registries = {t.registry_variant for t in gas.targets()}
+    announcers = {t.announcer_variant for t in gas.targets()}
+    assert registries == {"erc6538", "mlwe_full", "R1", "R3"}
+    assert announcers == {"A1", "A2"}
+
+
+def test_r3_registers_the_commitment_not_the_key() -> None:
+    """The 65-byte payload is the whole of R3's saving."""
+    from p3_hybrid.scheme import P3Hybrid
+
+    r3 = next(t for t in gas.targets() if t.registry_variant == "R3")
+    keys = r3.scheme.keygen(b"grid")
+    payload = gas.registry_payload(r3, keys)
+
+    assert len(payload) == 65
+    assert len(keys.meta.payload) > 800
+    # The encapsulation key itself must not reach the chain.
+    assert isinstance(r3.scheme, P3Hybrid)
+    _, ek_view = r3.scheme.split_meta(keys.meta)
+    assert ek_view not in payload
+
+
+def test_non_commitment_targets_register_the_full_meta() -> None:
+    for target in gas.targets():
+        if target.use_commitment:
+            continue
+        keys = target.scheme.keygen(b"grid")
+        assert gas.registry_payload(target, keys) == keys.meta.payload
+
+
+def test_calldata_floor_matches_eip7623() -> None:
+    """The floor is 21,000 plus ten gas per token, a token being one zero byte
+    or a quarter of a non-zero byte."""
+    tokens, floor = chain.calldata_floor(b"\x00" * 10)
+    assert tokens == 10
+    assert floor == 21_000 + 100
+
+    tokens, floor = chain.calldata_floor(b"\xff" * 10)
+    assert tokens == 40
+    assert floor == 21_000 + 400
+
+    assert chain.calldata_floor(b"") == (0, 21_000)
+
+
+def test_floor_dominates_a_large_announcement() -> None:
+    """Why A2 cannot help much: a 1088-byte ciphertext puts the transaction on
+    the calldata floor, where removing log data saves nothing."""
+    _, floor = chain.calldata_floor(b"\xab" * 1088)
+    log_data_saving = 1088 * 8  # 8 gas per byte of log data
+    assert floor > 21_000 + log_data_saving
+
+
+def _row(protocol: str, operation: str, gas_used: int, *, variant: str | None = None) -> gas.GasRow:
     return gas.GasRow(
         git_commit="deadbeef",
         network="anvil",
@@ -117,13 +183,17 @@ def _row(protocol: str, operation: str, gas_used: int) -> gas.GasRow:
         block_number=1,
         protocol=protocol,
         operation=operation,
-        registry_variant="R1",
-        announcer_variant="A1",
+        registry_variant=variant if operation == "register" and variant else "R1",
+        announcer_variant=variant if operation == "announce" and variant else "A1",
         param_set="mlkem768",
         sample_id=0,
         seed="seed",
         payload_bytes=1217,
         payload_keccak="00",
+        calldata_bytes=1348,
+        calldata_tokens=5000,
+        eip7623_floor_gas=71_000,
+        floor_bound=False,
         gas_used=gas_used,
         effective_gas_price=1,
         l1_gas_used=None,
@@ -140,6 +210,20 @@ def test_crossover_is_net_of_the_intrinsic_cost() -> None:
     assert "100,000" in report  # registration net of intrinsic
     assert "50,000" in report  # announcement net of intrinsic
     assert "2.0x" in report
+
+
+def test_crossover_separates_registry_variants() -> None:
+    """R1 and R3 must never be averaged together — they are the comparison."""
+    rows = [
+        _row("p3_hybrid", "register", 941_744, variant="R1"),
+        _row("p3_hybrid", "register", 115_264, variant="R3"),
+        _row("p3_hybrid", "announce", 67_730, variant="A1"),
+    ]
+    report = gas.crossover(rows)
+    assert "920,744" in report  # R1 net of intrinsic
+    assert "94,264" in report  # R3 net of intrinsic
+    # The pair not sent directly is composed and marked as such.
+    assert "*" in report
 
 
 def test_summarise_reports_a_distribution_not_a_mean() -> None:

@@ -41,6 +41,7 @@ import csv
 import json
 import os
 import platform
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,7 +51,7 @@ from eth_account import Account
 from eth_account.signers.local import LocalAccount
 from pqsap_core import chain, derive, kem
 from pqsap_core.chain import ANVIL_FUNDER_KEY, ChainError, Network
-from pqsap_core.scheme import StealthScheme
+from pqsap_core.scheme import RecipientKeys, StealthScheme
 from web3 import Web3
 
 from bench.sizes import git_commit
@@ -92,6 +93,13 @@ class GasRow:
     seed: str
     payload_bytes: int
     payload_keccak: str
+    #: Full transaction calldata, and the EIP-7623 floor it implies. Recorded
+    #: because announcements in this study sit on that floor, which is why
+    #: execution-side optimisations do not reduce their cost.
+    calldata_bytes: int
+    calldata_tokens: int
+    eip7623_floor_gas: int
+    floor_bound: bool
     gas_used: int | None
     effective_gas_price: int | None
     l1_gas_used: int | None
@@ -107,16 +115,24 @@ class MeasurementTarget:
     scheme: StealthScheme
     registry_contract: str
     registry_variant: str
+    announcer_contract: str = "StealthAnnouncer"
     announcer_variant: str = "A1"
+    #: R3 registers a commitment to the viewing key rather than the key itself.
+    use_commitment: bool = False
 
 
 def targets() -> list[MeasurementTarget]:
-    """The M4 measurement grid.
+    """The measurement grid.
 
-    Registration variants R3 and announcer variant A2 arrive in M5; this is the
-    naive baseline for all three protocols, which is what Q2's first cut needs.
-    P2 is measured at both parameter sets because the paper's own experiments
-    use the 512 set while a level-matched comparison against P3 needs 768. See
+    Registration and announcement are separate transactions, and neither cost
+    depends on the other's variant. Measuring P3 once with (R1, A1) and once
+    with (R3, A2) therefore yields all four combinations of the sweep: the
+    remaining two, (R1, A2) and (R3, A1), are composed from the same medians
+    rather than re-measured. `crossover` builds the full cross product on that
+    basis, which saves roughly a third of a testnet run's funding.
+
+    P2 appears at both parameter sets because the paper's own experiments use
+    the 512 set while a level-matched comparison against P3 needs 768. See
     p2_mlwe/NOTES.md.
     """
     return [
@@ -125,7 +141,37 @@ def targets() -> list[MeasurementTarget]:
         MeasurementTarget(P2Mlwe(kem.ML_KEM_512), "MLWERegistry", "mlwe_full"),
         MeasurementTarget(P3Hybrid(kem.ML_KEM_768), "RegistryFull", "R1"),
         MeasurementTarget(P3Hybrid(kem.ML_KEM_512), "RegistryFull", "R1"),
+        MeasurementTarget(
+            P3Hybrid(kem.ML_KEM_768),
+            "RegistryCommit",
+            "R3",
+            announcer_contract="AnnouncerMinLog",
+            announcer_variant="A2",
+            use_commitment=True,
+        ),
+        MeasurementTarget(
+            P3Hybrid(kem.ML_KEM_512),
+            "RegistryCommit",
+            "R3",
+            announcer_contract="AnnouncerMinLog",
+            announcer_variant="A2",
+            use_commitment=True,
+        ),
     ]
+
+
+def registry_payload(target: MeasurementTarget, keys: RecipientKeys) -> bytes:
+    """The bytes a target actually registers.
+
+    R3's whole saving lives here: it registers `M ‖ keccak256(ek_view)`, 65
+    bytes, and serves the encapsulation key off-chain. The contract is identical
+    to R1's — only the payload differs.
+    """
+    if not target.use_commitment:
+        return keys.meta.payload
+    scheme = target.scheme
+    assert isinstance(scheme, P3Hybrid)
+    return scheme.commitment_payload(keys.meta)
 
 
 def _funder(w3: Web3, net: Network) -> LocalAccount:
@@ -164,14 +210,15 @@ def _measure_sample(
         abi=chain.load_abi(target.registry_contract),
     )
     announcer = w3.eth.contract(
-        address=Web3.to_checksum_address(addresses["StealthAnnouncer"]),
-        abi=chain.load_abi("StealthAnnouncer"),
+        address=Web3.to_checksum_address(addresses[target.announcer_contract]),
+        abi=chain.load_abi(target.announcer_contract),
     )
 
     # A brand-new account, so every storage slot it writes is cold.
     sample_account = chain.new_account()
 
-    register_call = registry.functions.registerKeys(scheme.scheme_id, keys.meta.payload)
+    payload = registry_payload(target, keys)
+    register_call = registry.functions.registerKeys(scheme.scheme_id, payload)
     announcement = scheme.announce(keys.meta)
     announce_call = announcer.functions.announce(
         scheme.scheme_id,
@@ -190,9 +237,8 @@ def _measure_sample(
     now = datetime.now(UTC).isoformat()
     rows: list[GasRow] = []
 
-    registration = chain.send(
-        w3, sample_account, register_call.build_transaction({"from": sample_account.address})
-    )
+    register_tx = register_call.build_transaction({"from": sample_account.address})
+    registration = chain.send(w3, sample_account, register_tx)
     rows.append(
         _row(
             commit,
@@ -202,15 +248,15 @@ def _measure_sample(
             "register",
             sample_id,
             seed,
-            keys.meta.payload,
+            payload,
             registration,
             now,
+            _calldata_of(register_tx),
         )
     )
 
-    receipt = chain.send(
-        w3, sample_account, announce_call.build_transaction({"from": sample_account.address})
-    )
+    announce_tx = announce_call.build_transaction({"from": sample_account.address})
+    receipt = chain.send(w3, sample_account, announce_tx)
     rows.append(
         _row(
             commit,
@@ -223,6 +269,7 @@ def _measure_sample(
             announcement.payload,
             receipt,
             now,
+            _calldata_of(announce_tx),
         )
     )
 
@@ -252,6 +299,14 @@ def _sample_funding(w3: Web3, net: Network, funder_address: str, *calls: Any) ->
     return int(gas * chain.gas_price_now(w3) * FUNDING_MARGIN)
 
 
+def _calldata_of(tx: Mapping[str, Any]) -> bytes:
+    """The transaction's data field as raw bytes, for the EIP-7623 floor."""
+    data = tx.get("data", b"")
+    if isinstance(data, str):
+        return bytes.fromhex(data.removeprefix("0x"))
+    return bytes(data)
+
+
 def _row(
     commit: str,
     net: Network,
@@ -263,8 +318,11 @@ def _row(
     payload: bytes,
     receipt: dict[str, Any],
     timestamp: str,
+    calldata: bytes,
 ) -> GasRow:
     costs = chain.receipt_costs(receipt, net)
+    tokens, floor = chain.calldata_floor(calldata)
+    gas_used = costs["gas_used"]
     return GasRow(
         git_commit=commit,
         network=net.name,
@@ -279,7 +337,13 @@ def _row(
         seed=seed,
         payload_bytes=len(payload),
         payload_keccak=derive.keccak256(payload).hex(),
-        gas_used=costs["gas_used"],
+        calldata_bytes=len(calldata),
+        calldata_tokens=tokens,
+        eip7623_floor_gas=floor,
+        # Within a few gas of the floor means the floor is what was charged, and
+        # execution-side savings would have been invisible.
+        floor_bound=gas_used is not None and gas_used <= floor + 50,
+        gas_used=gas_used,
         effective_gas_price=costs["effective_gas_price"],
         l1_gas_used=costs["l1_gas_used"],
         l1_fee_wei=costs["l1_fee_wei"],
@@ -304,7 +368,10 @@ def run(network: str, samples: int, run_label: str) -> list[GasRow]:
     rows: list[GasRow] = []
     for target in targets():
         scheme = target.scheme
-        label = f"{scheme.name}/{scheme.param_set}/{target.registry_variant}"
+        label = (
+            f"{scheme.name}/{scheme.param_set}/"
+            f"{target.registry_variant}+{target.announcer_variant}"
+        )
         print(f"  {label} ... ", end="", flush=True)
         for sample_id in range(samples):
             rows.extend(
@@ -348,15 +415,15 @@ def estimate_run_cost(network: str, samples: int) -> str:
             abi=chain.load_abi(target.registry_contract),
         )
         announcer = w3.eth.contract(
-            address=Web3.to_checksum_address(addresses["StealthAnnouncer"]),
-            abi=chain.load_abi("StealthAnnouncer"),
+            address=Web3.to_checksum_address(addresses[target.announcer_contract]),
+            abi=chain.load_abi(target.announcer_contract),
         )
         announcement = scheme.announce(keys.meta)
 
         per_sample = int(
-            registry.functions.registerKeys(scheme.scheme_id, keys.meta.payload).estimate_gas(
-                {"from": funder.address}
-            )
+            registry.functions.registerKeys(
+                scheme.scheme_id, registry_payload(target, keys)
+            ).estimate_gas({"from": funder.address})
         )
         per_sample += int(
             announcer.functions.announce(
@@ -430,22 +497,47 @@ def write_run_meta(network: str, samples: int, path: Path | None = None) -> Path
     return path
 
 
-def summarise(rows: list[GasRow]) -> str:
-    """Median and spread per target — never a lone mean."""
-    groups: dict[tuple[str, str, str], list[int]] = {}
+def _variant_of(row: GasRow) -> str:
+    """Which variant a row measures: the registry for a registration, else the
+    announcer. Grouping without this would merge R1 with R3 and A1 with A2."""
+    return row.registry_variant if row.operation == "register" else row.announcer_variant
+
+
+def _medians(rows: list[GasRow]) -> dict[tuple[str, str, str, str], list[int]]:
+    groups: dict[tuple[str, str, str, str], list[int]] = {}
     for row in rows:
         if row.gas_used is None:
             continue
-        groups.setdefault((row.protocol, row.param_set, row.operation), []).append(row.gas_used)
-
-    header = f"{'protocol':<12}{'params':<11}{'op':<10}{'n':>4}{'median':>10}{'min':>10}{'max':>10}"
-    lines = [header, "-" * len(header)]
-    for (protocol, params, operation), values in groups.items():
+        key = (row.protocol, row.param_set, row.operation, _variant_of(row))
+        groups.setdefault(key, []).append(row.gas_used)
+    for values in groups.values():
         values.sort()
+    return groups
+
+
+def summarise(rows: list[GasRow]) -> str:
+    """Median and spread per variant — never a lone mean."""
+    groups = _medians(rows)
+
+    floor_bound: dict[tuple[str, str, str, str], bool] = {}
+    for row in rows:
+        key = (row.protocol, row.param_set, row.operation, _variant_of(row))
+        floor_bound[key] = floor_bound.get(key, True) and row.floor_bound
+
+    header = (
+        f"{'protocol':<12}{'params':<11}{'op':<10}{'variant':<10}"
+        f"{'n':>4}{'median':>10}{'min':>10}{'max':>10}{'  floor':<8}"
+    )
+    lines = [header, "-" * len(header)]
+    for key, values in sorted(groups.items()):
+        protocol, params, operation, variant = key
         median = values[len(values) // 2]
+        # "floor" marks a transaction whose cost is set entirely by its calldata
+        # under EIP-7623, so no execution-side saving could reduce it.
+        marker = "  <- floor" if floor_bound.get(key) else ""
         lines.append(
-            f"{protocol:<12}{params:<11}{operation:<10}{len(values):>4}"
-            f"{median:>10,}{values[0]:>10,}{values[-1]:>10,}"
+            f"{protocol:<12}{params:<11}{operation:<10}{variant:<10}{len(values):>4}"
+            f"{median:>10,}{values[0]:>10,}{values[-1]:>10,}{marker}"
         )
     return "\n".join(lines)
 
@@ -464,30 +556,42 @@ def crossover(rows: list[GasRow]) -> str:
     one-off cost, and it is the number the cumulative curves in M6 are built
     around. Reported net of the intrinsic transaction cost, per the charter.
     """
-    medians: dict[tuple[str, str, str], int] = {}
-    groups: dict[tuple[str, str, str], list[int]] = {}
-    for row in rows:
-        if row.gas_used is not None:
-            groups.setdefault((row.protocol, row.param_set, row.operation), []).append(row.gas_used)
-    for key, values in groups.items():
-        values.sort()
-        medians[key] = values[len(values) // 2]
+    groups = _medians(rows)
+    registrations: dict[tuple[str, str, str], int] = {}
+    announcements: dict[tuple[str, str, str], int] = {}
 
-    header = f"{'protocol':<12}{'params':<11}{'register':>11}{'announce':>10}{'crossover':>11}"
-    lines = [header, "-" * len(header), ""]
-    lines[2] = f"{'':<23}{'(net of the 21,000 intrinsic cost)':>32}"
-    lines.append("-" * len(header))
+    for (protocol, params, operation, variant), values in groups.items():
+        median = values[len(values) // 2]
+        target = registrations if operation == "register" else announcements
+        target[(protocol, params, variant)] = median
 
-    for (protocol, params, operation), value in sorted(medians.items()):
-        if operation != "register":
-            continue
-        announce = medians.get((protocol, params, "announce"))
-        if announce is None:
-            continue
-        reg_net = value - INTRINSIC_TX_GAS
-        ann_net = announce - INTRINSIC_TX_GAS
-        payments = reg_net / ann_net if ann_net > 0 else float("inf")
-        lines.append(f"{protocol:<12}{params:<11}{reg_net:>11,}{ann_net:>10,}{payments:>10.1f}x")
+    measured = {
+        (row.protocol, row.param_set, row.registry_variant, row.announcer_variant) for row in rows
+    }
+
+    header = (
+        f"{'protocol':<12}{'params':<11}{'reg':<10}{'ann':<7}"
+        f"{'register':>11}{'announce':>10}{'crossover':>11}"
+    )
+    lines = [
+        "(net of the 21,000 gas intrinsic cost; * = composed, not sent directly)",
+        "",
+        header,
+        "-" * len(header),
+    ]
+
+    for (protocol, params, reg_variant), reg_gas in sorted(registrations.items()):
+        for (ann_protocol, ann_params, ann_variant), ann_gas in sorted(announcements.items()):
+            if (ann_protocol, ann_params) != (protocol, params):
+                continue
+            reg_net = reg_gas - INTRINSIC_TX_GAS
+            ann_net = ann_gas - INTRINSIC_TX_GAS
+            payments = reg_net / ann_net if ann_net > 0 else float("inf")
+            mark = "" if (protocol, params, reg_variant, ann_variant) in measured else "*"
+            lines.append(
+                f"{protocol:<12}{params:<11}{reg_variant:<10}{ann_variant + mark:<7}"
+                f"{reg_net:>11,}{ann_net:>10,}{payments:>10.1f}x"
+            )
     return "\n".join(lines)
 
 
