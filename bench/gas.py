@@ -62,9 +62,17 @@ __all__ = ["GasRow", "MeasurementTarget", "run", "targets"]
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
-#: Native currency sent to each fresh sample account. Generous on anvil, and
-#: enough on a testnet for one large registration plus one announcement.
-SAMPLE_FUNDING_WEI = 5 * 10**16  # 0.05 ETH
+#: Headroom on the funding sent to each sample account, covering the gap between
+#: an estimate and the real cost plus any base-fee rise mid-sample. Whatever is
+#: left over is swept back, so a generous margin costs nothing but one transfer.
+FUNDING_MARGIN = 1.5
+
+#: Flat funding for a local chain, where the currency is worthless and sweeping
+#: back would only add noise to the run.
+LOCAL_FUNDING_WEI = 10**18  # 1 ETH
+
+#: Intrinsic cost of a plain transfer, used for funding and sweeping.
+TRANSFER_GAS = 21_000
 
 
 @dataclass(frozen=True)
@@ -162,17 +170,28 @@ def _measure_sample(
 
     # A brand-new account, so every storage slot it writes is cold.
     sample_account = chain.new_account()
-    chain.fund_account(w3, funder, sample_account.address, SAMPLE_FUNDING_WEI)
+
+    register_call = registry.functions.registerKeys(scheme.scheme_id, keys.meta.payload)
+    announcement = scheme.announce(keys.meta)
+    announce_call = announcer.functions.announce(
+        scheme.scheme_id,
+        Web3.to_checksum_address(announcement.stealth_address),
+        announcement.payload,
+        bytes([announcement.view_tag]),
+    )
+
+    chain.fund_account(
+        w3,
+        funder,
+        sample_account.address,
+        _sample_funding(w3, net, funder.address, register_call, announce_call),
+    )
 
     now = datetime.now(UTC).isoformat()
     rows: list[GasRow] = []
 
     registration = chain.send(
-        w3,
-        sample_account,
-        registry.functions.registerKeys(scheme.scheme_id, keys.meta.payload).build_transaction(
-            {"from": sample_account.address}
-        ),
+        w3, sample_account, register_call.build_transaction({"from": sample_account.address})
     )
     rows.append(
         _row(
@@ -189,16 +208,8 @@ def _measure_sample(
         )
     )
 
-    announcement = scheme.announce(keys.meta)
     receipt = chain.send(
-        w3,
-        sample_account,
-        announcer.functions.announce(
-            scheme.scheme_id,
-            Web3.to_checksum_address(announcement.stealth_address),
-            announcement.payload,
-            bytes([announcement.view_tag]),
-        ).build_transaction({"from": sample_account.address}),
+        w3, sample_account, announce_call.build_transaction({"from": sample_account.address})
     )
     rows.append(
         _row(
@@ -214,7 +225,31 @@ def _measure_sample(
             now,
         )
     )
+
+    # Recover what the sample did not spend. Pointless on a local chain, and on
+    # a testnet it is the difference between needing a faucet once and needing
+    # one every day.
+    if not net.is_local:
+        chain.sweep_to(w3, sample_account, funder.address)
+
     return rows
+
+
+def _sample_funding(w3: Web3, net: Network, funder_address: str, *calls: Any) -> int:
+    """Fund a sample account for exactly the work it is about to do.
+
+    A flat allowance would have to be sized for the most expensive target — P2's
+    1.75M-gas registration — and then paid to every sample of every target,
+    stranding the difference in a hundred accounts. Estimating per sample and
+    sweeping the remainder afterwards keeps a full run within what a testnet
+    faucet actually dispenses.
+    """
+    if net.is_local:
+        return LOCAL_FUNDING_WEI
+
+    gas = sum(int(call.estimate_gas({"from": funder_address})) for call in calls)
+    gas += TRANSFER_GAS  # the sweep-back transfer the sample pays for itself
+    return int(gas * chain.gas_price_now(w3) * FUNDING_MARGIN)
 
 
 def _row(
@@ -277,6 +312,89 @@ def run(network: str, samples: int, run_label: str) -> list[GasRow]:
             )
         print("done")
     return rows
+
+
+def estimate_run_cost(network: str, samples: int) -> str:
+    """Project what a full run will cost, without sending anything.
+
+    Testnet ETH is rationed and a full grid is close to a hundred million gas,
+    so the cost of finding out the hard way is a day of waiting on faucets.
+    This asks the target network to estimate every call it would make, prices
+    the total at the current gas price, and reports it.
+
+    Estimates are made against the deployed contracts on the real network, so
+    they account for that chain's actual state rather than a model of it.
+    """
+    w3, net = chain.connect(network)
+    addresses = chain.load_deployment(net.chain_id)
+    price = chain.gas_price_now(w3)
+    funder = _funder(w3, net)
+    balance = w3.eth.get_balance(funder.address)
+
+    lines = [
+        f"projected cost — {net.name} (chain {net.chain_id}), {samples} samples per target",
+        f"gas price now: {price / 1e9:.3f} gwei",
+        "",
+        f"{'protocol':<12}{'params':<11}{'gas/sample':>12}{'total gas':>14}{'ETH':>10}",
+        "-" * 59,
+    ]
+
+    grand_total = 0
+    for target in targets():
+        scheme = target.scheme
+        keys = scheme.keygen(b"estimate")
+        registry = w3.eth.contract(
+            address=Web3.to_checksum_address(addresses[target.registry_contract]),
+            abi=chain.load_abi(target.registry_contract),
+        )
+        announcer = w3.eth.contract(
+            address=Web3.to_checksum_address(addresses["StealthAnnouncer"]),
+            abi=chain.load_abi("StealthAnnouncer"),
+        )
+        announcement = scheme.announce(keys.meta)
+
+        per_sample = int(
+            registry.functions.registerKeys(scheme.scheme_id, keys.meta.payload).estimate_gas(
+                {"from": funder.address}
+            )
+        )
+        per_sample += int(
+            announcer.functions.announce(
+                scheme.scheme_id,
+                Web3.to_checksum_address(announcement.stealth_address),
+                announcement.payload,
+                bytes([announcement.view_tag]),
+            ).estimate_gas({"from": funder.address})
+        )
+        # Each sample also costs one funding transfer and one sweep-back.
+        per_sample += 2 * TRANSFER_GAS
+
+        total = per_sample * samples
+        grand_total += total
+        lines.append(
+            f"{scheme.name:<12}{scheme.param_set:<11}{per_sample:>12,}"
+            f"{total:>14,}{total * price / 1e18:>10.4f}"
+        )
+
+    lines += [
+        "-" * 59,
+        f"{'TOTAL':<23}{'':>12}{grand_total:>14,}{grand_total * price / 1e18:>10.4f}",
+        "",
+        f"funder {funder.address}",
+        f"balance {balance / 1e18:.4f} ETH",
+    ]
+
+    needed = grand_total * price / 1e18
+    have = balance / 1e18
+    if have >= needed:
+        lines.append(f"sufficient — {have - needed:.4f} ETH to spare at the current gas price")
+    else:
+        lines.append(f"SHORT by {needed - have:.4f} ETH at the current gas price")
+    lines.append(
+        "Gas prices move. Treat this as an order of magnitude, not a guarantee, "
+        "and re-run it just before measuring."
+    )
+    return "\n".join(lines)
 
 
 def write_csv(rows: list[GasRow], network: str, path: Path | None = None) -> Path:
@@ -382,7 +500,16 @@ def main() -> None:
     parser.add_argument(
         "--run-label", default="run1", help="prefix for sample seeds, making keypairs reproducible"
     )
+    parser.add_argument(
+        "--estimate",
+        action="store_true",
+        help="project the run's cost against the live network and exit, sending nothing",
+    )
     args = parser.parse_args()
+
+    if args.estimate:
+        print(estimate_run_cost(args.network, args.samples))
+        return
 
     rows = run(args.network, args.samples, args.run_label)
     print()

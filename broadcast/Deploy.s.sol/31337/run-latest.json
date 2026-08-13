@@ -37,7 +37,7 @@
       "isFixedGasLimit": false
     },
     {
-      "hash": "0xea6897cefa42bb38d253356912660c9d79e0321fa61bf6e75804e82ffefed806",
+      "hash": "0xbb657bd78bcef02fac2e72b65afb311d2db84220fdc37e1b0ede6abc60579491",
       "transactionType": "CREATE",
       "contractName": "MLWERegistry",
       "contractAddress": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
@@ -55,7 +55,7 @@
       "isFixedGasLimit": false
     },
     {
-      "hash": "0xbb657bd78bcef02fac2e72b65afb311d2db84220fdc37e1b0ede6abc60579491",
+      "hash": "0xea6897cefa42bb38d253356912660c9d79e0321fa61bf6e75804e82ffefed806",
       "transactionType": "CREATE",
       "contractName": "RegistryFull",
       "contractAddress": "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9",
@@ -82,7 +82,7 @@
       "type": "0x2",
       "transactionHash": "0x1c1be58f5ad253cd72aae7f87f995e645da74b6f3a30a7c9c270f1c1d3c8caaf",
       "transactionIndex": "0x0",
-      "blockHash": "0xbd81b84830f98139022271f08f354d58f8e9abb7236951a83e3ffad0a9936053",
+      "blockHash": "0xb3fd79e3b51efc90d231e5b262f70ba35e2e1a53e17d4da0dc50d7814effde30",
       "blockNumber": "0x1",
       "gasUsed": "0x2c507",
       "effectiveGasPrice": "0x3b9aca01",
@@ -93,16 +93,16 @@
     },
     {
       "status": "0x1",
-      "cumulativeGasUsed": "0xc56dc",
+      "cumulativeGasUsed": "0x991d5",
       "logs": [],
       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
       "type": "0x2",
       "transactionHash": "0x09c0374c092d6a9231139d3556a1a822a2936c1b0f701fc21884731bb8f63ce6",
-      "transactionIndex": "0x1",
-      "blockHash": "0xbd81b84830f98139022271f08f354d58f8e9abb7236951a83e3ffad0a9936053",
-      "blockNumber": "0x1",
+      "transactionIndex": "0x0",
+      "blockHash": "0x27bf16383203ab609e945dd292ee375fe5b90f3d4c08bd8f31af4e8fcf66aa6d",
+      "blockNumber": "0x2",
       "gasUsed": "0x991d5",
-      "effectiveGasPrice": "0x3b9aca01",
+      "effectiveGasPrice": "0x343e8551",
       "blobGasPrice": "0x1",
       "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
       "to": null,
@@ -110,16 +110,16 @@
     },
     {
       "status": "0x1",
-      "cumulativeGasUsed": "0x109c49",
+      "cumulativeGasUsed": "0xdd742",
       "logs": [],
       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
       "type": "0x2",
       "transactionHash": "0xbb657bd78bcef02fac2e72b65afb311d2db84220fdc37e1b0ede6abc60579491",
-      "transactionIndex": "0x2",
-      "blockHash": "0xbd81b84830f98139022271f08f354d58f8e9abb7236951a83e3ffad0a9936053",
-      "blockNumber": "0x1",
+      "transactionIndex": "0x1",
+      "blockHash": "0x27bf16383203ab609e945dd292ee375fe5b90f3d4c08bd8f31af4e8fcf66aa6d",
+      "blockNumber": "0x2",
       "gasUsed": "0x4456d",
-      "effectiveGasPrice": "0x3b9aca01",
+      "effectiveGasPrice": "0x343e8551",
       "blobGasPrice": "0x1",
       "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
       "to": null,
@@ -127,16 +127,16 @@
     },
     {
       "status": "0x1",
-      "cumulativeGasUsed": "0x14e1b6",
+      "cumulativeGasUsed": "0x4456d",
       "logs": [],
       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
       "type": "0x2",
       "transactionHash": "0xea6897cefa42bb38d253356912660c9d79e0321fa61bf6e75804e82ffefed806",
-      "transactionIndex": "0x3",
-      "blockHash": "0xbd81b84830f98139022271f08f354d58f8e9abb7236951a83e3ffad0a9936053",
-      "blockNumber": "0x1",
+      "transactionIndex": "0x0",
+      "blockHash": "0x75b1c6d77fd7b667de717e2441345cc3e96b38e78b5733662d9265b4b8882790",
+      "blockNumber": "0x3",
       "gasUsed": "0x4456d",
-      "effectiveGasPrice": "0x3b9aca01",
+      "effectiveGasPrice": "0x2e1bcd92",
       "blobGasPrice": "0x1",
       "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
       "to": null,
@@ -146,24 +146,24 @@
   "libraries": [],
   "pending": [],
   "returns": {
-    "p1Registry": {
-      "internal_type": "contract ERC6538Registry",
-      "value": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
-    },
-    "p3RegistryFull": {
-      "internal_type": "contract RegistryFull",
-      "value": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+    "announcer": {
+      "internal_type": "contract StealthAnnouncer",
+      "value": "0x5FbDB2315678afecb367f032d93F642f64180aa3"
     },
     "p2Registry": {
       "internal_type": "contract MLWERegistry",
       "value": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
     },
-    "announcer": {
-      "internal_type": "contract StealthAnnouncer",
-      "value": "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+    "p3RegistryFull": {
+      "internal_type": "contract RegistryFull",
+      "value": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+    },
+    "p1Registry": {
+      "internal_type": "contract ERC6538Registry",
+      "value": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
     }
   },
-  "timestamp": 1786631964903,
+  "timestamp": 1786632858804,
   "chain": 31337,
-  "commit": "402d06e"
+  "commit": "80fce06"
 }

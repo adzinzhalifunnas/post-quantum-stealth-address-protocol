@@ -37,11 +37,13 @@ __all__ = [
     "Network",
     "connect",
     "fund_account",
+    "gas_price_now",
     "load_deployment",
     "new_account",
     "raw_receipt",
     "receipt_costs",
     "send",
+    "sweep_to",
 ]
 
 
@@ -197,6 +199,52 @@ def receipt_costs(receipt: dict[str, Any], net: Network) -> dict[str, int | None
 def fund_account(w3: Web3, funder: LocalAccount, recipient: str, amount_wei: int) -> None:
     """Send native currency from the funder to a fresh sample account."""
     send(w3, funder, {"to": recipient, "value": Wei(amount_wei)})
+
+
+def gas_price_now(w3: Web3) -> int:
+    """Current cost per gas unit, used for budgeting before a run."""
+    try:
+        base = int(w3.eth.get_block("latest")["baseFeePerGas"])
+        return base * 2 + int(w3.eth.max_priority_fee)
+    except (KeyError, ValueError):  # pragma: no cover - pre-EIP-1559 nodes
+        return int(w3.eth.gas_price)
+
+
+def sweep_to(w3: Web3, account: LocalAccount, recipient: str) -> int:
+    """Return a sample account's remaining balance to the funder.
+
+    Testnet ETH is rationed by faucets, and a run uses a hundred throwaway
+    accounts. Without this, every unspent margin is stranded forever in an
+    account nothing will ever use again — which is how a benchmark ends up
+    needing several ETH it cannot get. Sweeping costs one 21,000-gas transfer
+    per sample and recovers the rest.
+
+    Returns:
+        Wei returned, or 0 if the balance would not cover its own transfer.
+    """
+    balance = w3.eth.get_balance(account.address)
+    price = gas_price_now(w3)
+    priority = min(int(w3.eth.max_priority_fee), price)
+    reserved = 21_000 * price
+    if balance <= reserved:
+        return 0
+
+    # Reserve at the ceiling price rather than the expected price: the transfer
+    # must remain affordable even if the base fee rises before it is mined. Any
+    # difference is left behind as dust, which is the safe direction to err.
+    value = balance - reserved
+    send(
+        w3,
+        account,
+        {
+            "to": recipient,
+            "value": Wei(value),
+            "gas": 21_000,
+            "maxFeePerGas": Wei(price),
+            "maxPriorityFeePerGas": Wei(priority),
+        },
+    )
+    return int(value)
 
 
 def load_deployment(chain_id: int, script: str = "Deploy.s.sol") -> dict[str, str]:
