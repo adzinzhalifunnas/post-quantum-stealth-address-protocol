@@ -131,11 +131,16 @@ def targets() -> list[MeasurementTarget]:
     """The measurement grid.
 
     Registration and announcement are separate transactions, and neither cost
-    depends on the other's variant. Measuring P3 once with (R1, A1) and once
-    with (R3, A2) therefore yields all four combinations of the sweep: the
-    remaining two, (R1, A2) and (R3, A1), are composed from the same medians
-    rather than re-measured. `crossover` builds the full cross product on that
-    basis, which saves roughly a third of a testnet run's funding.
+    depends on the other's variant, so each registry variant and each announcer
+    variant needs measuring once and the rest of the cross product is composed
+    from those medians. `crossover` builds it on that basis, which saves a
+    substantial share of a testnet run's funding.
+
+    Three registry variants for P3, not two. R2 emits the full meta-address and
+    stores nothing, sitting between R1's full on-chain storage and R3's
+    commitment. It is here because R3's claim of ERC-5564 parity is not
+    defensible without it: an examiner will ask what the intermediate design
+    costs, and the answer has to be measured rather than argued.
 
     P2 appears at both parameter sets because the paper's own experiments use
     the 512 set while a level-matched comparison against P3 needs 768. See
@@ -147,6 +152,10 @@ def targets() -> list[MeasurementTarget]:
         MeasurementTarget(P2Mlwe(kem.ML_KEM_512), "MLWERegistry", "mlwe_full"),
         MeasurementTarget(P3Hybrid(kem.ML_KEM_768), "RegistryFull", "R1"),
         MeasurementTarget(P3Hybrid(kem.ML_KEM_512), "RegistryFull", "R1"),
+        # R2 registers the same full meta-address as R1 — only the contract
+        # differs, so the measured gap between them is the storage cost alone.
+        MeasurementTarget(P3Hybrid(kem.ML_KEM_768), "RegistryEvent", "R2"),
+        MeasurementTarget(P3Hybrid(kem.ML_KEM_512), "RegistryEvent", "R2"),
         MeasurementTarget(
             P3Hybrid(kem.ML_KEM_768),
             "RegistryCommit",
@@ -699,6 +708,60 @@ def summarise(rows: list[GasRow]) -> str:
 INTRINSIC_TX_GAS = 21_000
 
 
+def cost_regime(rows: list[GasRow]) -> str:
+    """Which cost model governs each variant: the EIP-7623 floor, or execution.
+
+    The announcement side turned out to be floor-bound, which is what made A2's
+    log optimisation worthless. The same question has to be asked of every
+    registry, because the answer decides whether an optimisation can help at
+    all. A variant sitting on the floor cannot be improved by touching its
+    execution; one sitting well above it can.
+
+    R2 is the interesting case. It writes no storage, so a naive
+    log-versus-storage estimate would put its saving at the whole of R1's
+    ~40 cold SSTOREs — but if its 1217 bytes of calldata put it on the floor,
+    the saving is bounded by the floor instead and is smaller than that
+    estimate suggests.
+    """
+    groups: dict[tuple[str, str, str, str], list[GasRow]] = {}
+    for row in rows:
+        groups.setdefault(
+            (row.protocol, row.param_set, row.operation, _variant_of(row)), []
+        ).append(row)
+
+    header = (
+        f"{'protocol':<12}{'params':<11}{'op':<10}{'variant':<10}"
+        f"{'gas':>10}{'floor':>10}{'zero B':>8}{'non-zero':>10}  regime"
+    )
+    lines = [
+        "EIP-7623: is each variant bound by its calldata floor, or by execution?",
+        "",
+        header,
+        "-" * len(header),
+    ]
+
+    for key, group in sorted(groups.items()):
+        protocol, params, operation, variant = key
+        measured = sorted(r.gas_used for r in group if r.gas_used is not None)
+        if not measured:
+            continue
+        median = measured[len(measured) // 2]
+        floor = sorted(r.eip7623_floor_gas for r in group)[len(group) // 2]
+        calldata = sorted(r.calldata_bytes for r in group)[len(group) // 2]
+        tokens = sorted(r.calldata_tokens for r in group)[len(group) // 2]
+        # tokens = zero + 4*non_zero, and zero + non_zero = calldata bytes.
+        non_zero = (tokens - calldata) // 3
+        zero = calldata - non_zero
+
+        floor_bound = all(r.floor_bound for r in group)
+        regime = "FLOOR-BOUND" if floor_bound else f"execution ({median / floor:.1f}x floor)"
+        lines.append(
+            f"{protocol:<12}{params:<11}{operation:<10}{variant:<10}"
+            f"{median:>10,}{floor:>10,}{zero:>8,}{non_zero:>10,}  {regime}"
+        )
+    return "\n".join(lines)
+
+
 def crossover(rows: list[GasRow]) -> str:
     """Q2's first cut: when do cumulative announcements overtake registration?
 
@@ -778,6 +841,8 @@ def main() -> None:
     rows = run(args.network, args.samples, args.run_label)
     print()
     print(summarise(rows))
+    print()
+    print(cost_regime(rows))
     print()
     print(crossover(rows))
     print()

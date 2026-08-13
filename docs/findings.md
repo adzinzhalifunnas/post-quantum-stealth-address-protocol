@@ -14,16 +14,38 @@ usually the gap.
 
 ---
 
-## 1. The headline: registration is solved
+## 1. The headline: registration is solved, and cheaply
 
-**R3 reaches parity with ERC-5564, and marginally beats it.**
+Three registry designs, and the result is a **trade-off map rather than a
+winner**.
 
-| Registration | Payload | Gas | vs P1 |
-|---|---|---|---|
-| P1, ERC-6538 reference | 66 B | 115,316 | — |
-| **P3 R3, commitment** | **65 B** | **115,264** | **1.00×** |
-| P3 R1, full meta-address | 1217 B | 941,744 | 8.17× |
-| P2, two lattice keys | 2368 B | 1,745,670 | 15.14× |
+| Registration | Payload | Gas | vs P1 | Readable by a contract |
+|---|---|---|---|---|
+| **P3 R2, emit-only** | 1217 B | **71,170** | **0.62×** | **nothing** |
+| P1, ERC-6538 reference | 66 B | 115,316 | — | full |
+| P3 R3, commitment | 65 B | 115,264 | 1.00× | M only |
+| P3 R1, full meta-address | 1217 B | 941,744 | 8.17× | full |
+| P2, two lattice keys | 2368 B | 1,745,670 | 15.14× | full |
+
+**Storing 65 bytes costs more than emitting 1217.** R3 registers nineteen times
+fewer bytes than R2 and still costs 62% more, because cold `SSTORE` is 20,000
+gas per slot and R2 performs none at all. Byte counts predict calldata cost;
+they do not predict registration cost, and at these sizes storage dominates.
+
+R2 lands **exactly on its EIP-7623 calldata floor** — 71,170 measured against a
+71,170 floor. That makes it not merely cheapest but *optimal*: no registration
+carrying that payload can cost less. R1, R3 and ERC-6538 all sit well above
+their floors, in the execution-bound regime where storage is the cost.
+
+What R2 gives up is total: **no contract can read a meta-address registered this
+way.** For stealth addresses the reader is an off-chain sender, so the trade may
+be cheap — but a paymaster, router, or any contract paying a stealth address
+could not build on it. R3 keeps M readable for 62% more; R1 keeps everything
+readable for 13×.
+
+R2 was omitted from an earlier revision of the charter during scope trimming and
+has been restored. Without it, R3's parity claim would have been reported as the
+best available result when a cheaper design existed unmeasured.
 
 The charter posed this as a hypothesis worth testing first: *if R3 lands at
 parity with ERC-5564 registration, the registration penalty for post-quantum

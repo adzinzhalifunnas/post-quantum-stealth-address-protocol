@@ -107,6 +107,7 @@ pq-sap/
 ├── p3_hybrid/
 │   ├── contracts/
 │   │   ├── RegistryFull.sol           R1 naive
+│   │   ├── RegistryEvent.sol          R2 — emit-only, no storage
 │   │   ├── RegistryCommit.sol         R3 — the optimisation
 │   │   └── AnnouncerMinLog.sol        A2 — recurring-cost optimisation
 │   ├── scheme.py  tests/
@@ -168,9 +169,33 @@ regulatory feature both ERC-5564 and Mikić et al. emphasise. Anyone
 
 ## P3 optimisation variants
 
-**Registry (paid once).** R1 stores the full 1217-byte meta-address (~40
-slots, ~800k gas). R3 stores M in storage plus `keccak256(ek_view)` (~3-4
-slots), with ek_view served off-chain and verified against the commitment.
+**Registry (paid once).** Three variants, and the finding is a trade-off map
+across cost and on-chain readability rather than a single winner.
+
+R1 stores the full 1217-byte meta-address (~40 slots). R2 emits it as an event
+and stores nothing. R3 stores M plus `keccak256(ek_view)` (~4 slots), with
+ek_view served off-chain and verified against the commitment.
+
+**R2 was dropped from an earlier revision of this charter during scope trimming.
+That was a mistake and it is restored here.** It is the obvious alternative an
+examiner raises, and R3's claim of ERC-5564 parity is not defensible without a
+measured intermediate. It also turns out to be the cheapest of the three, so
+omitting it would have meant reporting a winner that had not been raced.
+
+What each gives up, measured:
+
+| | Registration | Readable by a contract | Availability |
+|---|---|---|---|
+| R1 | 941,744 | full meta-address | as available as Ethereum |
+| **R2** | **71,170** | **nothing** | as available as Ethereum |
+| R3 | 115,264 | M only | depends on an off-chain directory |
+| P1 ERC-6538 | 115,316 | full meta-address | as available as Ethereum |
+
+Two results worth carrying into the write-up. **Storing 65 bytes costs more
+than emitting 1217**, because cold `SSTORE` dominates and R2 performs none.
+And R2 lands exactly on its EIP-7623 calldata floor, so it is the cheapest any
+registration of that payload can be — while R1, R3 and ERC-6538 all sit well
+above their floors, in the execution-bound regime where storage is the cost.
 
 Note the hypothesis worth testing first: P1 registration is also ~4 slots
 (66 bytes). **If R3 lands at parity with ERC-5564 registration, the

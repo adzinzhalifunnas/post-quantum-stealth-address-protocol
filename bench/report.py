@@ -35,7 +35,8 @@ _NARRATIVE_ORDER = {
     ("p1_erc5564", "erc6538"): 0,
     ("p2_mlwe", "mlwe_full"): 1,
     ("p3_hybrid", "R1"): 2,
-    ("p3_hybrid", "R3"): 3,
+    ("p3_hybrid", "R2"): 3,
+    ("p3_hybrid", "R3"): 4,
 }
 
 
@@ -80,6 +81,54 @@ _QUALITATIVE: Final[list[tuple[str, str, str, str]]] = [
 ]
 
 
+#: What each registry design gives up. Cost alone would name a winner; these
+#: are the axes that stop it from being that simple.
+_REGISTRY_TRADEOFF: Final[list[tuple[str, str, str, str, str]]] = [
+    # variant, where the data lives, contract-readable, availability, gives up
+    ("erc6538", "storage", "full", "as available as Ethereum", "nothing — the standard"),
+    ("R1", "storage", "full", "as available as Ethereum", "nothing — pays for it"),
+    ("R2", "logs", "**nothing**", "as available as Ethereum", "all on-chain readability"),
+    ("R3", "storage + off-chain", "M only", "**depends on a directory**", "key availability"),
+]
+
+
+def _registry_tradeoff(variants: list[Variant]) -> str:
+    """Cost against on-chain readability — a map, not a ranking.
+
+    Ordering the registries by gas alone would declare R2 the winner and stop
+    there. It is the cheapest, and it is also the only one from which a contract
+    can read nothing at all. Which design is right depends on whether anything
+    on-chain ever needs to resolve a meta-address, so the honest output is a map
+    of what each buys and spends.
+    """
+    # Pin to the level-matched parameter set, matching the table above. Taking
+    # whichever row came first would silently mix ML-KEM-512 figures into a
+    # ML-KEM-768 comparison — two different numbers for the same thing in one
+    # report.
+    by_variant: dict[str, Variant] = {}
+    for v in variants:
+        if v.param_set not in {"mlkem768", "secp256k1"}:
+            continue
+        # Registration cost is independent of the announcer, so any remaining
+        # row for a given registry variant carries the same figure.
+        by_variant.setdefault(v.registry_variant, v)
+
+    lines = [
+        "**Registry trade-off map**, at ML-KEM-768. Cost is one axis; what a "
+        "contract can read back is the other. Ranking by gas alone would end the "
+        "discussion at R2, which is exactly the design that gives up the most.",
+        "",
+        "| Registry | Registration gas | Data lives in | Contract-readable "
+        "| Availability | Gives up |",
+        "|---|---|---|---|---|---|",
+    ]
+    for variant, where, readable, availability, gives_up in _REGISTRY_TRADEOFF:
+        found = by_variant.get(variant)
+        gas = f"{found.registration_gas:,}" if found else "—"
+        lines.append(f"| {variant} | {gas} | {where} | {readable} | {availability} | {gives_up} |")
+    return "\n".join(lines)
+
+
 def _protocol_comparison(variants: list[Variant]) -> str:
     """The three-way comparison, at the level-matched parameter set.
 
@@ -98,8 +147,9 @@ def _protocol_comparison(variants: list[Variant]) -> str:
     columns = [
         ("P1 ERC-5564", "p1_erc5564", "secp256k1", "p1_erc5564/secp256k1/erc6538+A1", "A1"),
         ("P2 MLWE", "p2_mlwe", "mlkem768", "p2_mlwe/mlkem768/mlwe_full+A1", "A1"),
-        ("P3 naive (R1+A1)", "p3_hybrid", "mlkem768", "p3_hybrid/mlkem768/R1+A1", "A1"),
-        ("P3 optimised (R3+A2)", "p3_hybrid", "mlkem768", "p3_hybrid/mlkem768/R3+A2", "A2"),
+        ("P3 R1+A1 (naive)", "p3_hybrid", "mlkem768", "p3_hybrid/mlkem768/R1+A1", "A1"),
+        ("P3 R2+A2 (emit-only)", "p3_hybrid", "mlkem768", "p3_hybrid/mlkem768/R2+A2", "A2"),
+        ("P3 R3+A2 (commitment)", "p3_hybrid", "mlkem768", "p3_hybrid/mlkem768/R3+A2", "A2"),
     ]
 
     def cell(getter: Callable[[str, str, str, str], str]) -> list[str]:
@@ -151,7 +201,7 @@ def _protocol_comparison(variants: list[Variant]) -> str:
         return f"{(variant.registration_gas - 21_000) / net_ann:.1f}"
 
     def offchain(protocol: str, params: str, label: str, ann: str) -> str:
-        """What R3 moved off-chain. Everything else keeps its key on-chain."""
+        """What R3 moved off-chain. Every other variant keeps its key on-chain."""
         if "R3" not in label:
             return "—"
         row = sizes.get((protocol, params))
@@ -160,8 +210,25 @@ def _protocol_comparison(variants: list[Variant]) -> str:
         # key that stays on-chain in both variants.
         return f"{int(row['meta_bytes']) - 33:,} B" if row else "—"
 
+    def readable(protocol: str, params: str, label: str, ann: str) -> str:
+        """What a contract can read back. The axis R2 trades away entirely."""
+        if "R2" in label:
+            return "**nothing**"
+        if "R3" in label:
+            return "M only"
+        return "full"
+
+    def where(protocol: str, params: str, label: str, ann: str) -> str:
+        if "R2" in label:
+            return "logs"
+        if "R3" in label:
+            return "storage + off-chain"
+        return "storage"
+
     rows: list[tuple[str, list[str]]] = [
         ("**Meta-address registered**", cell(size_of("meta_bytes"))),
+        ("Where it lives", cell(where)),
+        ("Readable by a contract", cell(readable)),
         ("Fetched off-chain, per recipient", cell(offchain)),
         ("**Announcement payload**", cell(size_of("announcement_bytes"))),
         ("**Registration gas**", cell(gas_of("registration_gas"))),
@@ -179,6 +246,8 @@ def _protocol_comparison(variants: list[Variant]) -> str:
     lines = [header, "|---" * (len(columns) + 1) + "|"]
     lines += [f"| {label} | " + " | ".join(values) + " |" for label, values in rows]
 
+    lines.append("")
+    lines.append(_registry_tradeoff(variants))
     lines.append("")
     lines.append(
         "R3's registration parity is an *on-chain* result. The 1,184-byte "

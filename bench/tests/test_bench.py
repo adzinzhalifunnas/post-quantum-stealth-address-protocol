@@ -116,8 +116,29 @@ def test_measurement_grid_covers_all_three_protocols() -> None:
 
 
 def test_every_target_names_a_real_registry_contract() -> None:
-    expected = {"ERC6538Registry", "MLWERegistry", "RegistryFull", "RegistryCommit"}
+    expected = {
+        "ERC6538Registry",
+        "MLWERegistry",
+        "RegistryFull",
+        "RegistryEvent",
+        "RegistryCommit",
+    }
     assert {t.registry_contract for t in gas.targets()} <= expected
+
+
+def test_r2_registers_the_same_payload_as_r1() -> None:
+    """R2 differs from R1 only in the contract, never in what it publishes.
+
+    That is what makes the gap between them the storage cost alone. If R2
+    registered something smaller, the comparison would confound two changes.
+    """
+    r1 = next(t for t in gas.targets() if t.registry_variant == "R1")
+    r2 = next(t for t in gas.targets() if t.registry_variant == "R2")
+
+    keys_r1 = r1.scheme.keygen(b"same")
+    keys_r2 = r2.scheme.keygen(b"same")
+    assert gas.registry_payload(r1, keys_r1) == gas.registry_payload(r2, keys_r2)
+    assert r1.registry_contract != r2.registry_contract
 
 
 def test_only_p3_departs_from_the_shared_announcer() -> None:
@@ -141,7 +162,7 @@ def test_grid_covers_every_variant_at_least_once() -> None:
     appear once; `crossover` composes the rest of the cross product."""
     registries = {t.registry_variant for t in gas.targets()}
     announcers = {t.announcer_variant for t in gas.targets()}
-    assert registries == {"erc6538", "mlwe_full", "R1", "R3"}
+    assert registries == {"erc6538", "mlwe_full", "R1", "R2", "R3"}
     assert announcers == {"A1", "A2"}
 
 
@@ -267,6 +288,29 @@ def test_crossover_separates_registry_variants() -> None:
     assert "94,264" in report  # R3 net of intrinsic
     # The pair not sent directly is composed and marked as such.
     assert "*" in report
+
+
+def test_cost_regime_distinguishes_floor_from_execution() -> None:
+    """Which model governs a variant decides whether it can be optimised at all.
+
+    A transaction sitting on its calldata floor cannot be made cheaper by
+    touching execution — that is why A2's log optimisation was worthless, and
+    why the same question has to be asked of every registry.
+    """
+    from dataclasses import replace
+
+    floor_row = replace(_row("p3_hybrid", "register", 71_170, variant="R2"), floor_bound=True)
+    execution_row = replace(
+        _row("p3_hybrid", "register", 941_744, variant="R1"),
+        floor_bound=False,
+        eip7623_floor_gas=71_170,
+    )
+
+    report = gas.cost_regime([floor_row, execution_row])
+    assert "FLOOR-BOUND" in report
+    assert "execution" in report
+    # R1 is 13.2x its floor; the ratio tells a reader how much room storage takes.
+    assert "13.2x floor" in report
 
 
 def test_summarise_reports_a_distribution_not_a_mean() -> None:

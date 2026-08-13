@@ -1,38 +1,48 @@
 # PQ-SAP measurement report — anvil
 
-Generated from `bench/results/` at commit `632b5525a81d`. Every figure traces to a CSV row; nothing here is recomputed or adjusted.
+Generated from `bench/results/` at commit `1c37eb0a3226`. Every figure traces to a CSV row; nothing here is recomputed or adjusted.
 
 > **These are local-chain measurements.** Gas *units* are deterministic and will reproduce on any chain running the same EVM version, so the comparisons below stand. Fee columns — and in particular Base Sepolia's separate L1 data fee — require the testnet runs and are not yet filled in.
 
 ## Provenance
 
 - Measured on: `anvil` (chain state recorded per row)
-- **Measured at commit:** `d6f8e309ed05`
+- **Measured at commit:** `1c37eb0a3226`
 - liboqs: 0.16.0 via liboqs-python 0.16.0
 - solc 0.8.28, optimizer runs 200
 - Machine: macOS-26.5.2-arm64-arm-64bit, Python 3.12.11
 - Samples per target: 20
-- Measurement timestamp: 2026-08-13T16:12:46.250399+00:00
-- ⚠️ The working tree has moved on since these numbers were taken. Re-run `bench.gas` before quoting them if any contract changed.
+- Measurement timestamp: 2026-08-13T17:42:44.498272+00:00
 
 ## 1. The three protocols, head to head
 
 P2 and P3 are both shown at ML-KEM-768, so a security-level difference is never mistaken for a design difference. P3 appears twice because the optimisation is the artifact.
 
-| | P1 ERC-5564 | P2 MLWE | P3 naive (R1+A1) | P3 optimised (R3+A2) |
-|---|---|---|---|---|
-| **Meta-address registered** | 66 B | 2,368 B | 1,217 B | 65 B |
-| Fetched off-chain, per recipient | — | — | — | 1,184 B |
-| **Announcement payload** | 33 B | 1,088 B | 1,088 B | 1,088 B |
-| **Registration gas** | 115,316 | 1,745,658 | 941,744 | 115,264 |
-| **Announcement gas** | 28,067 | 67,730 | 67,700 | 66,970 |
-| Cumulative at k=1 | 0.143M | 1.813M | 1.009M | 0.182M |
-| Cumulative at k=10 | 0.396M | 2.423M | 1.619M | 0.785M |
-| Cumulative at k=100 | 2.922M | 8.519M | 7.712M | 6.812M |
-| Crossover (payments) | 13.3 | 36.9 | 19.7 | 2.1 |
-| Scan time per announcement | 30.71 µs | 28.23 µs | 29.28 µs | 28.20 µs |
-| Scan bytes per announcement | 224 B | 1,248 B | 1,248 B | 1,284 B |
-| Scan RPC round trips | 0 | 0 | 0 | 1 |
+| | P1 ERC-5564 | P2 MLWE | P3 R1+A1 (naive) | P3 R2+A2 (emit-only) | P3 R3+A2 (commitment) |
+|---|---|---|---|---|---|
+| **Meta-address registered** | 66 B | 2,368 B | 1,217 B | 1,217 B | 65 B |
+| Where it lives | storage | storage | storage | logs | storage + off-chain |
+| Readable by a contract | full | full | full | **nothing** | M only |
+| Fetched off-chain, per recipient | — | — | — | — | 1,184 B |
+| **Announcement payload** | 33 B | 1,088 B | 1,088 B | 1,088 B | 1,088 B |
+| **Registration gas** | 115,316 | 1,745,670 | 941,744 | 71,170 | 115,264 |
+| **Announcement gas** | 28,067 | 67,700 | 67,730 | 67,000 | 67,000 |
+| Cumulative at k=1 | 0.143M | 1.813M | 1.009M | 0.138M | 0.182M |
+| Cumulative at k=10 | 0.396M | 2.423M | 1.619M | 0.741M | 0.785M |
+| Cumulative at k=100 | 2.922M | 8.516M | 7.715M | 6.771M | 6.815M |
+| Crossover (payments) | 13.3 | 36.9 | 19.7 | 1.1 | 2.0 |
+| Scan time per announcement | 30.71 µs | 28.23 µs | 29.28 µs | 28.20 µs | 28.20 µs |
+| Scan bytes per announcement | 224 B | 1,248 B | 1,248 B | 1,284 B | 1,284 B |
+| Scan RPC round trips | 0 | 0 | 0 | 1 | 1 |
+
+**Registry trade-off map**, at ML-KEM-768. Cost is one axis; what a contract can read back is the other. Ranking by gas alone would end the discussion at R2, which is exactly the design that gives up the most.
+
+| Registry | Registration gas | Data lives in | Contract-readable | Availability | Gives up |
+|---|---|---|---|---|---|
+| erc6538 | 115,316 | storage | full | as available as Ethereum | nothing — the standard |
+| R1 | 941,744 | storage | full | as available as Ethereum | nothing — pays for it |
+| R2 | 71,170 | logs | **nothing** | as available as Ethereum | all on-chain readability |
+| R3 | 115,264 | storage + off-chain | M only | **depends on a directory** | key availability |
 
 R3's registration parity is an *on-chain* result. The 1,184-byte encapsulation key did not disappear — it is served off-chain and verified against the on-chain commitment before a sender may use it. That fetch is per recipient rather than per payment, so it caches, and it is paid in a sender's bandwidth rather than in anyone's gas. The cost it does carry is availability: a directory that will not answer blocks payments to that recipient, where R1's key is as available as Ethereum itself.
 
@@ -69,16 +79,20 @@ Medians over 20 fresh keypairs and 20 fresh EOAs per variant. First registration
 | Protocol | Params | Registry | Announcer | Registration | Announcement |
 |---|---|---|---|---|---|
 | p1_erc5564 | secp256k1 | erc6538 | A1 | 115,316 | 28,067 |
-| p2_mlwe | mlkem512 | mlwe_full | A1 | 1,194,672 | 54,930 |
-| p2_mlwe | mlkem768 | mlwe_full | A1 | 1,745,658 | 67,730 |
-| p3_hybrid | mlkem512 | R1 | A1 | 666,246 | 54,930 |
-| p3_hybrid | mlkem512 | R1 | A2 | 666,246 | 54,200 |
-| p3_hybrid | mlkem768 | R1 | A1 | 941,744 | 67,700 |
-| p3_hybrid | mlkem768 | R1 | A2 | 941,744 | 66,970 |
+| p2_mlwe | mlkem512 | mlwe_full | A1 | 1,194,696 | 54,930 |
+| p2_mlwe | mlkem768 | mlwe_full | A1 | 1,745,670 | 67,700 |
+| p3_hybrid | mlkem512 | R1 | A1 | 666,234 | 54,930 |
+| p3_hybrid | mlkem512 | R1 | A2 | 666,234 | 54,230 |
+| p3_hybrid | mlkem768 | R1 | A1 | 941,744 | 67,730 |
+| p3_hybrid | mlkem768 | R1 | A2 | 941,744 | 67,000 |
+| p3_hybrid | mlkem512 | R2 | A1 | 55,810 | 54,930 |
+| p3_hybrid | mlkem512 | R2 | A2 | 55,810 | 54,230 |
+| p3_hybrid | mlkem768 | R2 | A1 | 71,170 | 67,730 |
+| p3_hybrid | mlkem768 | R2 | A2 | 71,170 | 67,000 |
 | p3_hybrid | mlkem512 | R3 | A1 | 115,264 | 54,930 |
-| p3_hybrid | mlkem512 | R3 | A2 | 115,264 | 54,200 |
-| p3_hybrid | mlkem768 | R3 | A1 | 115,264 | 67,700 |
-| p3_hybrid | mlkem768 | R3 | A2 | 115,264 | 66,970 |
+| p3_hybrid | mlkem512 | R3 | A2 | 115,264 | 54,230 |
+| p3_hybrid | mlkem768 | R3 | A1 | 115,264 | 67,730 |
+| p3_hybrid | mlkem768 | R3 | A2 | 115,264 | 67,000 |
 
 ## 4. Cost ratios and crossover
 
@@ -93,10 +107,14 @@ Crossover is the payment count at which cumulative announcements overtake regist
 | p3_hybrid/mlkem512/R1+A2 | 5.78x | 1.93x | 19.4 |
 | p3_hybrid/mlkem768/R1+A1 | 8.17x | 2.41x | 19.7 |
 | p3_hybrid/mlkem768/R1+A2 | 8.17x | 2.39x | 20.0 |
+| p3_hybrid/mlkem512/R2+A1 | 0.48x | 1.96x | 1.0 |
+| p3_hybrid/mlkem512/R2+A2 | 0.48x | 1.93x | 1.0 |
+| p3_hybrid/mlkem768/R2+A1 | 0.62x | 2.41x | 1.1 |
+| p3_hybrid/mlkem768/R2+A2 | 0.62x | 2.39x | 1.1 |
 | p3_hybrid/mlkem512/R3+A1 | 1.00x | 1.96x | 2.8 |
 | p3_hybrid/mlkem512/R3+A2 | 1.00x | 1.93x | 2.8 |
 | p3_hybrid/mlkem768/R3+A1 | 1.00x | 2.41x | 2.0 |
-| p3_hybrid/mlkem768/R3+A2 | 1.00x | 2.39x | 2.1 |
+| p3_hybrid/mlkem768/R3+A2 | 1.00x | 2.39x | 2.0 |
 
 ## 5. Cumulative cost
 
@@ -106,15 +124,19 @@ Total gas after k payments, including registration. This is the headline: which 
 |---|---|---|---|---|
 | p1_erc5564/secp256k1/erc6538+A1 | 0.143M | 0.396M | 1.519M | 2.922M |
 | p2_mlwe/mlkem512/mlwe_full+A1 | 1.250M | 1.744M | 3.941M | 6.688M |
-| p2_mlwe/mlkem768/mlwe_full+A1 | 1.813M | 2.423M | 5.132M | 8.519M |
+| p2_mlwe/mlkem768/mlwe_full+A1 | 1.813M | 2.423M | 5.131M | 8.516M |
 | p3_hybrid/mlkem512/R1+A1 | 0.721M | 1.216M | 3.413M | 6.159M |
-| p3_hybrid/mlkem512/R1+A2 | 0.720M | 1.208M | 3.376M | 6.086M |
-| p3_hybrid/mlkem768/R1+A1 | 1.009M | 1.619M | 4.327M | 7.712M |
-| p3_hybrid/mlkem768/R1+A2 | 1.009M | 1.611M | 4.290M | 7.639M |
+| p3_hybrid/mlkem512/R1+A2 | 0.720M | 1.209M | 3.378M | 6.089M |
+| p3_hybrid/mlkem768/R1+A1 | 1.009M | 1.619M | 4.328M | 7.715M |
+| p3_hybrid/mlkem768/R1+A2 | 1.009M | 1.612M | 4.292M | 7.642M |
+| p3_hybrid/mlkem512/R2+A1 | 0.111M | 0.605M | 2.802M | 5.549M |
+| p3_hybrid/mlkem512/R2+A2 | 0.110M | 0.598M | 2.767M | 5.479M |
+| p3_hybrid/mlkem768/R2+A1 | 0.139M | 0.748M | 3.458M | 6.844M |
+| p3_hybrid/mlkem768/R2+A2 | 0.138M | 0.741M | 3.421M | 6.771M |
 | p3_hybrid/mlkem512/R3+A1 | 0.170M | 0.665M | 2.862M | 5.608M |
-| p3_hybrid/mlkem512/R3+A2 | 0.169M | 0.657M | 2.825M | 5.535M |
-| p3_hybrid/mlkem768/R3+A1 | 0.183M | 0.792M | 3.500M | 6.885M |
-| p3_hybrid/mlkem768/R3+A2 | 0.182M | 0.785M | 3.464M | 6.812M |
+| p3_hybrid/mlkem512/R3+A2 | 0.169M | 0.658M | 2.827M | 5.538M |
+| p3_hybrid/mlkem768/R3+A1 | 0.183M | 0.793M | 3.502M | 6.888M |
+| p3_hybrid/mlkem768/R3+A2 | 0.182M | 0.785M | 3.465M | 6.815M |
 
 ## 6. Receiver scan cost (Q3)
 

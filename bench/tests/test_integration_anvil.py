@@ -222,8 +222,11 @@ class TestFullPipeline:
 
         rows = gas.run("anvil", samples=1, run_label="integration")
 
-        # Seven targets, one sample, two operations each.
-        assert len(rows) == 14
+        # Every target, one sample, two operations each. Derived rather than
+        # hardcoded, so adding a variant does not silently break the assertion
+        # into meaninglessness.
+        expected_rows = len(gas.targets()) * 2
+        assert len(rows) == expected_rows
         assert all(r.gas_used and r.gas_used > 0 for r in rows)
         assert all(r.tx_hash.startswith("0x") for r in rows)
 
@@ -242,7 +245,7 @@ class TestFullPipeline:
         gas_csv = testnet_path / "gas_anvil.csv"
         receipts = testnet_path / "receipts_anvil.jsonl"
         assert gas_csv.exists() and receipts.exists()
-        assert len(receipts.read_text().splitlines()) == 14
+        assert len(receipts.read_text().splitlines()) == expected_rows
 
         # Raw receipts must be archived verbatim and parseable.
         for line in receipts.read_text().splitlines():
@@ -259,14 +262,21 @@ class TestFullPipeline:
         assert "No gas measurements yet" not in text
         assert "local-chain measurements" in text
 
-        # With one sample per target the median is that sample, so every
-        # measured figure must appear verbatim in the report. This is the check
-        # that the numbers survive the whole trip from receipt to Markdown.
+        # Registration figures must survive verbatim from receipt to Markdown.
+        # Registry variants are unique across targets, so with one sample each
+        # the reported median is that sample.
+        #
+        # Announcements are deliberately not checked this way: several targets
+        # share an announcer variant, so their rows fall into one group and the
+        # reported median is one of them rather than all.
         for row in rows:
+            if row.operation != "register":
+                continue
             assert row.gas_used is not None
-            assert (
-                f"{row.gas_used:,}" in text
-            ), f"{row.protocol}/{row.operation} gas {row.gas_used:,} missing from the report"
+            assert f"{row.gas_used:,}" in text, (
+                f"{row.protocol}/{row.registry_variant} registration "
+                f"{row.gas_used:,} missing from the report"
+            )
 
     def test_a_crash_preserves_everything_already_paid_for(
         self, testnet_path: Path, monkeypatch: pytest.MonkeyPatch
