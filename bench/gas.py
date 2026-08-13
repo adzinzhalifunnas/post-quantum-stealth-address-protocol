@@ -102,8 +102,14 @@ class GasRow:
     floor_bound: bool
     gas_used: int | None
     effective_gas_price: int | None
+    #: OP Stack only. Null on an L1 chain — null meaning "not applicable here",
+    #: never zero, which would read as "measured and found to be nothing".
     l1_gas_used: int | None
     l1_fee_wei: int | None
+    l1_gas_price: int | None
+    l1_blob_base_fee: int | None
+    l1_base_fee_scalar: int | None
+    l1_blob_base_fee_scalar: int | None
     tx_hash: str
     timestamp: str
 
@@ -199,8 +205,13 @@ def _measure_sample(
     sample_id: int,
     run_label: str,
     commit: str,
+    receipts: list[dict[str, Any]],
 ) -> list[GasRow]:
-    """Measure one fresh registration and one announcement."""
+    """Measure one fresh registration and one announcement.
+
+    Appends both raw receipts to `receipts` so nothing the node returned is
+    discarded — see `write_receipts`.
+    """
     scheme = target.scheme
     seed = f"{run_label}/{scheme.name}/{scheme.param_set}/{sample_id:04d}"
     keys = scheme.keygen(seed.encode())
@@ -239,6 +250,7 @@ def _measure_sample(
 
     register_tx = register_call.build_transaction({"from": sample_account.address})
     registration = chain.send(w3, sample_account, register_tx)
+    receipts.append(registration)
     rows.append(
         _row(
             commit,
@@ -257,6 +269,7 @@ def _measure_sample(
 
     announce_tx = announce_call.build_transaction({"from": sample_account.address})
     receipt = chain.send(w3, sample_account, announce_tx)
+    receipts.append(receipt)
     rows.append(
         _row(
             commit,
@@ -347,37 +360,68 @@ def _row(
         effective_gas_price=costs["effective_gas_price"],
         l1_gas_used=costs["l1_gas_used"],
         l1_fee_wei=costs["l1_fee_wei"],
+        l1_gas_price=costs["l1_gas_price"],
+        l1_blob_base_fee=costs["l1_blob_base_fee"],
+        l1_base_fee_scalar=costs["l1_base_fee_scalar"],
+        l1_blob_base_fee_scalar=costs["l1_blob_base_fee_scalar"],
         tx_hash=str(receipt.get("transactionHash", "")),
         timestamp=timestamp,
     )
 
 
 def run(network: str, samples: int, run_label: str) -> list[GasRow]:
-    """Measure the full grid on one network."""
+    """Measure the full grid on one network, checkpointing as it goes.
+
+    Results are flushed to disk after every target and again if the run dies.
+    A full grid is several hundred sequential transactions on a real network,
+    and the funds behind them come from rate-limited faucets — so a crash at
+    80% must not throw away the 80% already paid for. Re-running afterwards
+    with a fresh `--run-label` tops up what is missing rather than starting
+    over.
+    """
     w3, net = chain.connect(network)
     addresses = chain.load_deployment(net.chain_id)
     funder = _funder(w3, net)
     commit = git_commit()
+    balance = w3.eth.get_balance(funder.address)
 
     print(f"network {net.name} (chain {net.chain_id}), {samples} samples per target")
-    print(f"funder {funder.address}")
+    print(f"funder {funder.address} — {balance / 1e18:.4f} ETH")
     for name, address in sorted(addresses.items()):
         print(f"  {name:<18} {address}")
     print()
 
     rows: list[GasRow] = []
-    for target in targets():
-        scheme = target.scheme
-        label = (
-            f"{scheme.name}/{scheme.param_set}/"
-            f"{target.registry_variant}+{target.announcer_variant}"
-        )
-        print(f"  {label} ... ", end="", flush=True)
-        for sample_id in range(samples):
-            rows.extend(
-                _measure_sample(w3, net, target, addresses, funder, sample_id, run_label, commit)
+    receipts: list[dict[str, Any]] = []
+
+    def checkpoint() -> None:
+        if rows:
+            write_csv(rows, network)
+            write_receipts(receipts, network)
+
+    try:
+        for target in targets():
+            scheme = target.scheme
+            label = (
+                f"{scheme.name}/{scheme.param_set}/"
+                f"{target.registry_variant}+{target.announcer_variant}"
             )
-        print("done")
+            print(f"  {label} ... ", end="", flush=True)
+            for sample_id in range(samples):
+                rows.extend(
+                    _measure_sample(
+                        w3, net, target, addresses, funder, sample_id, run_label, commit, receipts
+                    )
+                )
+            checkpoint()
+            print(f"done ({len(rows)} rows saved)")
+    except (Exception, KeyboardInterrupt) as exc:
+        checkpoint()
+        spent = (balance - w3.eth.get_balance(funder.address)) / 1e18
+        print(f"\n  INTERRUPTED after {len(rows)} rows ({spent:.4f} ETH spent).")
+        print(f"  Everything measured so far is saved. Cause: {type(exc).__name__}: {exc}")
+        raise
+
     return rows
 
 
@@ -462,6 +506,113 @@ def estimate_run_cost(network: str, samples: int) -> str:
         "and re-run it just before measuring."
     )
     return "\n".join(lines)
+
+
+def preflight(network: str) -> str:
+    """Check everything checkable without sending a transaction.
+
+    Run this before a real measurement. Faucet funds are rate-limited, so the
+    failures worth catching are the ones that would otherwise surface halfway
+    through a run that has already spent them: a wrong RPC, contracts not
+    deployed, a receipt field the node does not return, an unfunded key.
+    """
+    checks: list[tuple[bool, str]] = []
+
+    try:
+        w3, net = chain.connect(network)
+        checks.append((True, f"RPC reachable, chain id {net.chain_id} as expected"))
+    except ChainError as exc:
+        return f"FAIL: {exc}"
+
+    try:
+        addresses = chain.load_deployment(net.chain_id)
+        missing = {t.registry_contract for t in targets()} | {
+            t.announcer_contract for t in targets()
+        }
+        absent = sorted(missing - set(addresses))
+        checks.append(
+            (not absent, f"contracts deployed ({len(addresses)} found)")
+            if not absent
+            else (False, f"contracts NOT deployed: {', '.join(absent)}")
+        )
+    except ChainError as exc:
+        return "\n".join([f"  ok  {m}" for _, m in checks] + [f"FAIL: {exc}"])
+
+    try:
+        funder = _funder(w3, net)
+        balance = w3.eth.get_balance(funder.address)
+        checks.append((balance > 0, f"funder {funder.address} holds {balance / 1e18:.4f} ETH"))
+    except ChainError as exc:
+        return "\n".join([f"  ok  {m}" for _, m in checks] + [f"FAIL: {exc}"])
+
+    # Gas estimation must work against every deployed contract, or the run will
+    # fail on its first sample rather than its last.
+    for target in targets():
+        scheme = target.scheme
+        keys = scheme.keygen(b"preflight")
+        registry = w3.eth.contract(
+            address=Web3.to_checksum_address(addresses[target.registry_contract]),
+            abi=chain.load_abi(target.registry_contract),
+        )
+        try:
+            registry.functions.registerKeys(
+                scheme.scheme_id, registry_payload(target, keys)
+            ).estimate_gas({"from": funder.address})
+            ok, note = True, f"{scheme.name}/{scheme.param_set}/{target.registry_variant} estimates"
+        except Exception as exc:
+            ok, note = False, f"{target.registry_variant} estimate FAILED: {exc}"
+        checks.append((ok, note))
+
+    # The receipt fields the harness reads must actually be present. Checked
+    # against a real transaction already on the chain, so nothing is sent.
+    latest = w3.eth.get_block("latest", full_transactions=False)
+    sample_tx: str | None = None
+    for offset in range(30):
+        block = w3.eth.get_block(max(0, latest["number"] - offset), full_transactions=False)
+        transactions = block["transactions"]
+        if transactions:
+            first = transactions[0]
+            sample_tx = first.hex() if isinstance(first, bytes) else str(first)
+            break
+    if sample_tx:
+        receipt = chain.raw_receipt(w3, sample_tx)
+        required = ["gasUsed", "effectiveGasPrice", "blockNumber"]
+        if net.is_op_stack:
+            required += ["l1Fee", "l1GasUsed", "l1GasPrice"]
+        absent_fields = [f for f in required if f not in receipt]
+        checks.append(
+            (not absent_fields, f"receipt fields present ({', '.join(required)})")
+            if not absent_fields
+            else (False, f"receipt MISSING fields: {', '.join(absent_fields)}")
+        )
+    else:
+        checks.append((True, "no recent transaction to check receipt fields against (skipped)"))
+
+    lines = [f"preflight — {net.name} (chain {net.chain_id})", ""]
+    lines += [f"  {'ok ' if ok else 'FAIL'}  {note}" for ok, note in checks]
+    lines.append("")
+    if all(ok for ok, _ in checks):
+        lines.append("All checks passed. Now run --estimate to price the run, then measure.")
+    else:
+        lines.append("Fix the failures above before spending anything.")
+    return "\n".join(lines)
+
+
+def write_receipts(receipts: list[dict[str, Any]], network: str, path: Path | None = None) -> Path:
+    """Archive every raw receipt, exactly as the node returned it.
+
+    Insurance. A testnet run costs scarce faucet funds, so discovering later
+    that some field was needed and not extracted would mean waiting on a faucet
+    to measure again. The CSV holds what the analysis uses; this holds
+    everything, so any future question can be answered from data already paid
+    for.
+    """
+    path = path or RESULTS_DIR / f"receipts_{network}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as handle:
+        for receipt in receipts:
+            handle.write(json.dumps(receipt, sort_keys=True) + "\n")
+    return path
 
 
 def write_csv(rows: list[GasRow], network: str, path: Path | None = None) -> Path:
@@ -605,11 +756,20 @@ def main() -> None:
         "--run-label", default="run1", help="prefix for sample seeds, making keypairs reproducible"
     )
     parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="verify RPC, deployment, funding and receipt fields, then exit. Sends nothing.",
+    )
+    parser.add_argument(
         "--estimate",
         action="store_true",
         help="project the run's cost against the live network and exit, sending nothing",
     )
     args = parser.parse_args()
+
+    if args.preflight:
+        print(preflight(args.network))
+        return
 
     if args.estimate:
         print(estimate_run_cost(args.network, args.samples))
@@ -621,8 +781,11 @@ def main() -> None:
     print()
     print(crossover(rows))
     print()
+    # `run` already checkpointed these after every target; writing once more is
+    # cheap and keeps the final file authoritative.
     print(f"written: {write_csv(rows, args.network)}")
     print(f"written: {write_run_meta(args.network, args.samples)}")
+    print(f"written: {RESULTS_DIR / f'receipts_{args.network}.jsonl'} (raw receipts, archival)")
 
 
 if __name__ == "__main__":

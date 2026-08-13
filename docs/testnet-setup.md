@@ -139,15 +139,29 @@ Commit the resulting `broadcast/` files. They tie every measured result to the
 deployment transaction of specific bytecode, which is what makes a number in the
 thesis traceable.
 
-## Step 6 — Estimate, then measure
+## Step 6 — Preflight, estimate, then measure
 
-Check the projection first:
+Three commands, in order. The first two send nothing.
+
+**Preflight** checks everything that can fail without spending: RPC reachable
+and on the right chain, all six contracts deployed, funder holding a balance,
+gas estimation working against every target, and — importantly on Base Sepolia —
+that the receipt actually carries the `l1Fee` fields the harness reads. It
+verifies the last of these against a transaction already on the chain, so it
+costs nothing.
+
+```bash
+uv run python -m bench.gas --network eth_sepolia --preflight
+```
+
+**Estimate** prices the run at the current gas price and says plainly whether
+your balance covers it.
 
 ```bash
 uv run python -m bench.gas --network eth_sepolia --samples 20 --estimate
 ```
 
-Then run it. Expect this to take a while — it is several hundred sequential
+**Measure.** Expect this to take a while — several hundred sequential
 transactions, each waiting for a receipt.
 
 ```bash
@@ -158,9 +172,22 @@ uv run python -m bench.gas --network eth_sepolia --samples 20 --run-label sepoli
 uv run python -m bench.gas --network base_sepolia --samples 20 --run-label basesep1
 ```
 
+### If the run dies partway through, nothing is lost
+
+Results are flushed to disk after every target and again if the run is
+interrupted, so a failure at 80% keeps the 80% already paid for. The harness
+prints how many rows survived and how much was spent. Re-run with a **fresh
+`--run-label`** to add the missing targets rather than starting over — a
+different label means different seeds, so the new samples are genuinely new.
+
+Every raw receipt is also archived to `receipts_<network>.jsonl`, exactly as the
+node returned it. That is deliberate insurance: if some later analysis needs a
+field the CSV does not carry, it is already there and no second faucet cycle is
+needed.
+
 Results land in `bench/results/gas_<network>.csv` alongside a
-`run_meta_<network>.json` recording the library versions, compiler settings and
-machine. Both are committed and **never hand-edited**. A surprising number means
+`run_meta_<network>.json` recording library versions, compiler settings and
+machine. All are committed and **never hand-edited**. A surprising number means
 re-run and investigate; it never means adjust.
 
 ## What to expect, and what would be suspicious
@@ -177,6 +204,12 @@ contract) and is worth chasing before trusting anything else.
 | P2 MLWE | mlkem512 | 1,194,672 | 54,900 |
 | P3 R1 | mlkem768 | 941,744 | 67,730 |
 | P3 R1 | mlkem512 | 666,246 | 54,930 |
+| P3 R3 | either | 115,264 | — |
+
+One legitimate outlier to expect rather than be alarmed by: roughly one R3
+registration in 256 costs about 20,000 gas *less* than the rest. Its payload's
+last byte happens to be zero, so the final storage word is all zeros and
+Solidity skips a cold `SSTORE`. Report the median, not the mean.
 
 What will *not* match, and is the reason for measuring on real networks at all:
 

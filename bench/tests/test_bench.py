@@ -67,26 +67,42 @@ def test_connect_reports_missing_rpc_url(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_receipt_costs_separates_l1_from_l2() -> None:
-    """L2 execution gas and L1 data fee are different columns, never summed."""
+    """L2 execution gas and L1 data fee are different columns, never summed.
+
+    Field names and shape are copied from a real Base Sepolia receipt fetched
+    on 2026-08-13, so this asserts against what the chain actually returns
+    rather than against what the OP Stack documentation says it should.
+    """
     receipt = {
-        "gasUsed": "0xe6f4",
-        "effectiveGasPrice": "0x3b9aca00",
-        "blockNumber": "0x10",
-        "l1Fee": "0x2386f26fc10000",
-        "l1GasUsed": "0x640",
+        "gasUsed": "0x2c108",
+        "effectiveGasPrice": "0x5b8d80",
+        "blockNumber": "0x2b54679",
+        "l1Fee": "0x4cd61a529",
+        "l1GasUsed": "0x16da",
+        "l1GasPrice": "0x3d69ade2",
+        "l1BlobBaseFee": "0x374c6d2",
+        "l1BaseFeeScalar": "0x44d",
+        "l1BlobBaseFeeScalar": "0xa118b",
     }
 
     op_stack = chain.receipt_costs(receipt, Network("base_sepolia", 84532, "X", is_op_stack=True))
-    assert op_stack["gas_used"] == 0xE6F4
-    assert op_stack["l1_fee_wei"] == 0x2386F26FC10000
-    assert op_stack["l1_gas_used"] == 0x640
+    assert op_stack["gas_used"] == 0x2C108
+    assert op_stack["l1_fee_wei"] == 0x4CD61A529
+    assert op_stack["l1_gas_used"] == 0x16DA
+    # Captured but not yet used in analysis: a testnet run is expensive enough
+    # that recovering a column later would mean measuring again.
+    assert op_stack["l1_gas_price"] == 0x3D69ADE2
+    assert op_stack["l1_blob_base_fee"] == 0x374C6D2
+    assert op_stack["l1_base_fee_scalar"] == 0x44D
+    assert op_stack["l1_blob_base_fee_scalar"] == 0xA118B
 
     # An L1 chain has no such fields, and they must stay null rather than zero —
     # zero would read as "measured and found to be nothing".
     l1 = chain.receipt_costs(receipt, Network("eth_sepolia", 11155111, "X"))
-    assert l1["gas_used"] == 0xE6F4
+    assert l1["gas_used"] == 0x2C108
     assert l1["l1_fee_wei"] is None
     assert l1["l1_gas_used"] is None
+    assert l1["l1_gas_price"] is None
 
 
 def test_receipt_costs_tolerates_missing_fields() -> None:
@@ -198,6 +214,10 @@ def _row(protocol: str, operation: str, gas_used: int, *, variant: str | None = 
         effective_gas_price=1,
         l1_gas_used=None,
         l1_fee_wei=None,
+        l1_gas_price=None,
+        l1_blob_base_fee=None,
+        l1_base_fee_scalar=None,
+        l1_blob_base_fee_scalar=None,
         tx_hash="0x0",
         timestamp="now",
     )

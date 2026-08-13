@@ -190,10 +190,24 @@ def receipt_costs(receipt: dict[str, Any], net: Network) -> dict[str, int | None
         "block_number": as_int("blockNumber"),
         "l1_fee_wei": None,
         "l1_gas_used": None,
+        "l1_gas_price": None,
+        "l1_blob_base_fee": None,
+        "l1_base_fee_scalar": None,
+        "l1_blob_base_fee_scalar": None,
     }
     if net.is_op_stack:
+        # Verified against a live Base Sepolia receipt on 2026-08-13: all of
+        # these are present. The scalars and blob base fee are captured even
+        # though nothing currently computes with them, because a testnet run
+        # costs scarce faucet funds and re-running to recover a column that was
+        # right there the first time would be a waste. They are also what makes
+        # an L1 fee explainable rather than merely reported.
         costs["l1_fee_wei"] = as_int("l1Fee")
         costs["l1_gas_used"] = as_int("l1GasUsed")
+        costs["l1_gas_price"] = as_int("l1GasPrice")
+        costs["l1_blob_base_fee"] = as_int("l1BlobBaseFee")
+        costs["l1_base_fee_scalar"] = as_int("l1BaseFeeScalar")
+        costs["l1_blob_base_fee_scalar"] = as_int("l1BlobBaseFeeScalar")
     return costs
 
 

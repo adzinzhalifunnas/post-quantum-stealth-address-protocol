@@ -1,19 +1,18 @@
 # PQ-SAP measurement report — anvil
 
-Generated from `bench/results/` at commit `0844a6792d2e`. Every figure traces to a CSV row; nothing here is recomputed or adjusted.
+Generated from `bench/results/` at commit `d6f8e309ed05`. Every figure traces to a CSV row; nothing here is recomputed or adjusted.
 
 > **These are local-chain measurements.** Gas *units* are deterministic and will reproduce on any chain running the same EVM version, so the comparisons below stand. Fee columns — and in particular Base Sepolia's separate L1 data fee — require the testnet runs and are not yet filled in.
 
 ## Provenance
 
 - Measured on: `anvil` (chain state recorded per row)
-- **Measured at commit:** `68da1f17d3dc`
+- **Measured at commit:** `d6f8e309ed05`
 - liboqs: 0.16.0 via liboqs-python 0.16.0
 - solc 0.8.28, optimizer runs 200
 - Machine: macOS-26.5.2-arm64-arm-64bit, Python 3.12.11
 - Samples per target: 20
-- Measurement timestamp: 2026-08-13T15:17:57.033087+00:00
-- ⚠️ The working tree has moved on since these numbers were taken. Re-run `bench.gas` before quoting them if any contract changed.
+- Measurement timestamp: 2026-08-13T16:12:46.250399+00:00
 
 ## 1. Sizes
 
@@ -35,15 +34,15 @@ Medians over 20 fresh keypairs and 20 fresh EOAs per variant. First registration
 |---|---|---|---|---|---|
 | p1_erc5564 | secp256k1 | erc6538 | A1 | 115,316 | 28,067 |
 | p2_mlwe | mlkem512 | mlwe_full | A1 | 1,194,672 | 54,930 |
-| p2_mlwe | mlkem768 | mlwe_full | A1 | 1,745,670 | 67,730 |
-| p3_hybrid | mlkem512 | R1 | A1 | 666,258 | 54,930 |
-| p3_hybrid | mlkem512 | R1 | A2 | 666,258 | 54,200 |
-| p3_hybrid | mlkem768 | R1 | A1 | 941,744 | 67,730 |
-| p3_hybrid | mlkem768 | R1 | A2 | 941,744 | 67,000 |
+| p2_mlwe | mlkem768 | mlwe_full | A1 | 1,745,658 | 67,730 |
+| p3_hybrid | mlkem512 | R1 | A1 | 666,246 | 54,930 |
+| p3_hybrid | mlkem512 | R1 | A2 | 666,246 | 54,200 |
+| p3_hybrid | mlkem768 | R1 | A1 | 941,744 | 67,700 |
+| p3_hybrid | mlkem768 | R1 | A2 | 941,744 | 66,970 |
 | p3_hybrid | mlkem512 | R3 | A1 | 115,264 | 54,930 |
 | p3_hybrid | mlkem512 | R3 | A2 | 115,264 | 54,200 |
-| p3_hybrid | mlkem768 | R3 | A1 | 115,264 | 67,730 |
-| p3_hybrid | mlkem768 | R3 | A2 | 115,264 | 67,000 |
+| p3_hybrid | mlkem768 | R3 | A1 | 115,264 | 67,700 |
+| p3_hybrid | mlkem768 | R3 | A2 | 115,264 | 66,970 |
 
 ## 3. Cost ratios and crossover
 
@@ -61,7 +60,7 @@ Crossover is the payment count at which cumulative announcements overtake regist
 | p3_hybrid/mlkem512/R3+A1 | 1.00x | 1.96x | 2.8 |
 | p3_hybrid/mlkem512/R3+A2 | 1.00x | 1.93x | 2.8 |
 | p3_hybrid/mlkem768/R3+A1 | 1.00x | 2.41x | 2.0 |
-| p3_hybrid/mlkem768/R3+A2 | 1.00x | 2.39x | 2.0 |
+| p3_hybrid/mlkem768/R3+A2 | 1.00x | 2.39x | 2.1 |
 
 ## 4. Cumulative cost
 
@@ -74,12 +73,12 @@ Total gas after k payments, including registration. This is the headline: which 
 | p2_mlwe/mlkem768/mlwe_full+A1 | 1.813M | 2.423M | 5.132M | 8.519M |
 | p3_hybrid/mlkem512/R1+A1 | 0.721M | 1.216M | 3.413M | 6.159M |
 | p3_hybrid/mlkem512/R1+A2 | 0.720M | 1.208M | 3.376M | 6.086M |
-| p3_hybrid/mlkem768/R1+A1 | 1.009M | 1.619M | 4.328M | 7.715M |
-| p3_hybrid/mlkem768/R1+A2 | 1.009M | 1.612M | 4.292M | 7.642M |
+| p3_hybrid/mlkem768/R1+A1 | 1.009M | 1.619M | 4.327M | 7.712M |
+| p3_hybrid/mlkem768/R1+A2 | 1.009M | 1.611M | 4.290M | 7.639M |
 | p3_hybrid/mlkem512/R3+A1 | 0.170M | 0.665M | 2.862M | 5.608M |
 | p3_hybrid/mlkem512/R3+A2 | 0.169M | 0.657M | 2.825M | 5.535M |
-| p3_hybrid/mlkem768/R3+A1 | 0.183M | 0.793M | 3.502M | 6.888M |
-| p3_hybrid/mlkem768/R3+A2 | 0.182M | 0.785M | 3.465M | 6.815M |
+| p3_hybrid/mlkem768/R3+A1 | 0.183M | 0.792M | 3.500M | 6.885M |
+| p3_hybrid/mlkem768/R3+A2 | 0.182M | 0.785M | 3.464M | 6.812M |
 
 ## 5. Receiver scan cost (Q3)
 

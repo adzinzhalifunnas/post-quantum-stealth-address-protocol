@@ -34,6 +34,25 @@ exists to explore simply vanishes from registration.
 existing ERC-6538 deployment could serve R3 today without redeployment. That is
 a deployability result, not merely a cost one.
 
+### An outlier that justifies the sampling rule
+
+One R3 sample in twenty registered for 95,340 gas instead of 115,264 — almost
+exactly one cold `SSTORE` less. It is not noise, and it is not an error.
+
+R3's payload is 65 bytes, so Solidity stores it as a length slot plus three data
+words, the third holding a single meaningful byte and 31 bytes of zero padding.
+When that byte is itself zero the whole word is zero, Solidity writes zero to an
+already-zero slot, and the 20,000-gas cold write never happens. Byte 64 is the
+last byte of `keccak256(ek_view)`, so this occurs with probability 1/256 —
+consistent with seeing it once in twenty samples.
+
+This is the charter's "payload content genuinely shifts cost" pitfall made
+concrete, and it is the argument for its two rules in one observation: sample at
+least twenty distinct keypairs, and report the median rather than the mean. A
+single measurement had a 1-in-256 chance of reporting a registration cost 17%
+below the truth, and a mean over twenty would have been dragged 1,000 gas low by
+this one draw.
+
 The security cost is one added assumption: `ek_view` is served off-chain and the
 sender must verify it against the on-chain commitment before encapsulating.
 `P3Hybrid.verify_commitment` does this, and `test_commitment_rejects_a_substituted_key`

@@ -1,8 +1,8 @@
 {
-  "git_commit": "68da1f17d3dc695e9a7f715c19efa8edfa229045",
+  "git_commit": "d6f8e309ed057ca559a4d4e1f0c68f549fee99e1",
   "network": "anvil",
   "samples_per_target": 20,
-  "timestamp": "2026-08-13T15:17:57.033087+00:00",
+  "timestamp": "2026-08-13T16:12:46.250399+00:00",
   "kem_backend": {
     "liboqs_version": "0.16.0",
     "liboqs_python_version": "0.16.0",
