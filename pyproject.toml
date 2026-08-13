@@ -65,6 +65,8 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Vendored Solidity dependencies ship their own Python tooling; not ours to lint.
+exclude = ["dependencies", ".venv", "out", "cache", "broadcast"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

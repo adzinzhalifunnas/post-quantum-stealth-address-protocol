@@ -19,7 +19,8 @@ cache/
 
 # Deliberately NOT ignored (thesis reproducibility requires them in the repo):
 #   uv.lock            exact Python dependency pins
-#   soldeer.lock       exact Solidity dependency pins
-#   dependencies/      vendored Solidity deps, so a repo archive builds standalone
+#   dependencies/      forge-std, pinned as a git submodule — see README on why
+#                      this needs `git clone --recurse-submodules`
 #   bench/results/     measurement data — committed, never hand-edited
-#   broadcast/         Foundry deployment audit trail
+#   broadcast/         Foundry deployment audit trail, tying every measured row
+#                      to the deployment transaction of specific bytecode

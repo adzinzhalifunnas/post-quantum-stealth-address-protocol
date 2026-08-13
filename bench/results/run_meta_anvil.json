@@ -1,0 +1,35 @@
+{
+  "git_commit": "402d06e2aa2211269b9fad898136dfb1e4109f0f",
+  "network": "anvil",
+  "samples_per_target": 20,
+  "timestamp": "2026-08-13T14:42:13.196248+00:00",
+  "kem_backend": {
+    "liboqs_version": "0.16.0",
+    "liboqs_python_version": "0.16.0",
+    "mechanisms": {
+      "ML-KEM-768": {
+        "alg_version": "FIPS203",
+        "nist_level": 3,
+        "ek_len": 1184,
+        "dk_len": 2400,
+        "ct_len": 1088,
+        "ss_len": 32
+      },
+      "ML-KEM-512": {
+        "alg_version": "FIPS203",
+        "nist_level": 1,
+        "ek_len": 800,
+        "dk_len": 1632,
+        "ct_len": 768,
+        "ss_len": 32
+      }
+    }
+  },
+  "machine": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "processor": "arm",
+    "python": "3.12.11"
+  },
+  "solc": "0.8.28",
+  "optimizer_runs": 200
+}

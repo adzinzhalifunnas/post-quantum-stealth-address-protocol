@@ -20,12 +20,25 @@ costs are directly comparable:
 The repository path contains spaces. Quote it in every shell command.
 
 ```bash
+git clone --recurse-submodules <repo-url>
+```
+
+```bash
 uv sync
 ```
 
 `uv` provisions Python 3.12 (pinned in `.python-version`) and installs exact
 versions from the committed `uv.lock`. Solidity tooling is Foundry; install it
 with `foundryup` if `forge --version` fails.
+
+`--recurse-submodules` matters. forge-std is pinned as a git submodule at
+v1.9.7, because Soldeer's registry was returning HTTP 500 when this was set up.
+The consequence is a real reproducibility caveat: a GitHub zip archive of this
+repository does **not** contain submodule contents, so an examiner who downloads
+it rather than cloning it will not be able to run `forge test`. Nothing in the
+measured contracts depends on forge-std — it is used only by the test and
+deploy scripts — so `forge build` works either way. If Soldeer recovers, moving
+the dependency there removes the caveat entirely.
 
 ### The liboqs shared library
 

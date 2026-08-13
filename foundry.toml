@@ -18,6 +18,15 @@ optimizer_runs = 200
 # Keep `test = "."` from collecting the vendored dependency tree's own tests.
 no_match_path = "dependencies/**"
 
+# `src = "."` puts the vendored dependencies in the lint path too, and their
+# warnings would bury ours on every build. Lint explicitly on our own contracts
+# instead:  forge lint shared/contracts p1_erc5564 p2_mlwe p3_hybrid
+[lint]
+lint_on_build = false
+# DOMAIN_SEPARATOR is EIP-712's own spelling and appears in the verbatim
+# ERC-6538 port. Renaming it would break both convention and fidelity.
+mixed_case_exceptions = ["ERC", "DOMAIN_SEPARATOR"]
+
 # Contract sizes and gas snapshots are regression aids only. Authoritative gas
 # numbers come from real testnet receipts (bench/gas.py) — Foundry's internal
 # metering excludes the 21k intrinsic cost and per-byte calldata cost, which is
