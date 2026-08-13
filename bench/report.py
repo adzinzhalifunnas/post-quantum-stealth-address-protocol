@@ -70,6 +70,12 @@ _QUALITATIVE: Final[list[tuple[str, str, str, str]]] = [
     ("Spendable on unmodified EVM", "yes", "**no**", "yes"),
     ("Dual-key separation (view ≠ spend)", "yes", "yes", "yes"),
     ("Quantum leak once an address spends", "total", "none", "partial (Q1)"),
+    (
+        "Off-chain availability dependency",
+        "none",
+        "none",
+        "R3 only — key served off-chain",
+    ),
     ("ERC-5564 scheme id", "1 (standard)", "0x4D4C5745 (ours)", "0x50513348 (ours)"),
 ]
 
@@ -144,8 +150,19 @@ def _protocol_comparison(variants: list[Variant]) -> str:
             return "—"
         return f"{(variant.registration_gas - 21_000) / net_ann:.1f}"
 
+    def offchain(protocol: str, params: str, label: str, ann: str) -> str:
+        """What R3 moved off-chain. Everything else keeps its key on-chain."""
+        if "R3" not in label:
+            return "—"
+        row = sizes.get((protocol, params))
+        # The commitment replaces the encapsulation key, so what a sender must
+        # fetch is exactly that key: the meta-address less the 33-byte spending
+        # key that stays on-chain in both variants.
+        return f"{int(row['meta_bytes']) - 33:,} B" if row else "—"
+
     rows: list[tuple[str, list[str]]] = [
         ("**Meta-address registered**", cell(size_of("meta_bytes"))),
+        ("Fetched off-chain, per recipient", cell(offchain)),
         ("**Announcement payload**", cell(size_of("announcement_bytes"))),
         ("**Registration gas**", cell(gas_of("registration_gas"))),
         ("**Announcement gas**", cell(gas_of("announcement_gas"))),
@@ -162,6 +179,17 @@ def _protocol_comparison(variants: list[Variant]) -> str:
     lines = [header, "|---" * (len(columns) + 1) + "|"]
     lines += [f"| {label} | " + " | ".join(values) + " |" for label, values in rows]
 
+    lines.append("")
+    lines.append(
+        "R3's registration parity is an *on-chain* result. The 1,184-byte "
+        "encapsulation key did not disappear — it is served off-chain and "
+        "verified against the on-chain commitment before a sender may use it. "
+        "That fetch is per recipient rather than per payment, so it caches, and "
+        "it is paid in a sender's bandwidth rather than in anyone's gas. The "
+        "cost it does carry is availability: a directory that will not answer "
+        "blocks payments to that recipient, where R1's key is as available as "
+        "Ethereum itself."
+    )
     lines.append("")
     lines.append("Qualitative properties, from the protocol definitions:")
     lines.append("")

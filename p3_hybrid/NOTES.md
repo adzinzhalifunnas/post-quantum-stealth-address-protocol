@@ -53,11 +53,50 @@ single measurement had a 1-in-256 chance of reporting a registration cost 17%
 below the truth, and a mean over twenty would have been dragged 1,000 gas low by
 this one draw.
 
-The security cost is one added assumption: `ek_view` is served off-chain and the
-sender must verify it against the on-chain commitment before encapsulating.
-`P3Hybrid.verify_commitment` does this, and `test_commitment_rejects_a_substituted_key`
-demonstrates what happens to a sender who skips it — whoever serves the key
-could otherwise substitute their own and read every payment.
+### The off-chain half, and what it actually costs
+
+R3's parity is an **on-chain** result, and stating it without the other half
+would be misleading: the 1184-byte encapsulation key did not disappear, it
+moved. `p3_hybrid/keyservice.py` is the moved-to half, made explicit so it can
+be reasoned about rather than waved at.
+
+| | Registered on-chain | Fetched off-chain |
+|---|---|---|
+| R1 | 1217 B | — |
+| R3 | 65 B | 1184 B, per recipient |
+
+Three things keep the trade favourable, and all three belong in the write-up:
+
+- **The fetch is per recipient, not per payment.** One resolution serves any
+  number of payments to that recipient, so it caches. A cost model charging it
+  per payment would badly overstate it.
+- **It is paid in a sender's bandwidth, not in anyone's gas.** Against 826,480
+  gas saved on registration, permanently.
+- **A sender already reads the chain to get a meta-address.** R3 makes that read
+  smaller and adds one off-chain fetch — an extra round trip, not a new class of
+  work.
+
+What it genuinely costs is **availability**. A directory that will not answer
+blocks payments to that recipient, where R1's key is as available as Ethereum.
+That is a real regression and is stated as one; integrity, by contrast, is fully
+protected by the commitment.
+
+**Transport is deliberately unspecified.** ENS text record, HTTPS, IPFS,
+wallet-to-wallet, QR code — all work, because the commitment makes the channel
+untrusted. `KeyDirectory` captures only the shape: fetch from somewhere you do
+not trust, refuse anything that does not hash to what the chain committed to.
+
+`resolve_meta_address` is the only supported route from a commitment to a usable
+meta-address, and it fetches and verifies as one operation, because every
+realistic way to get this wrong is doing the first without the second.
+`test_keyservice.py` runs a hostile directory that substitutes, corrupts,
+truncates, serves the wrong registrant's key, and refuses outright — each is
+rejected, and unavailability raises a different exception from dishonesty, since
+one means retry and the other means never trust this source again.
+
+`test_a_sender_who_skips_verification_is_the_one_who_loses` shows the
+consequence concretely: a sender who uses a substituted key produces an
+announcement the attacker can decapsulate and the victim cannot find.
 
 ## A2 does almost nothing, and the reason is EIP-7623
 

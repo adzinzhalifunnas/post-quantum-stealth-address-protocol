@@ -1,6 +1,6 @@
 # PQ-SAP measurement report — anvil
 
-Generated from `bench/results/` at commit `baed80940fe7`. Every figure traces to a CSV row; nothing here is recomputed or adjusted.
+Generated from `bench/results/` at commit `632b5525a81d`. Every figure traces to a CSV row; nothing here is recomputed or adjusted.
 
 > **These are local-chain measurements.** Gas *units* are deterministic and will reproduce on any chain running the same EVM version, so the comparisons below stand. Fee columns — and in particular Base Sepolia's separate L1 data fee — require the testnet runs and are not yet filled in.
 
@@ -22,6 +22,7 @@ P2 and P3 are both shown at ML-KEM-768, so a security-level difference is never 
 | | P1 ERC-5564 | P2 MLWE | P3 naive (R1+A1) | P3 optimised (R3+A2) |
 |---|---|---|---|---|
 | **Meta-address registered** | 66 B | 2,368 B | 1,217 B | 65 B |
+| Fetched off-chain, per recipient | — | — | — | 1,184 B |
 | **Announcement payload** | 33 B | 1,088 B | 1,088 B | 1,088 B |
 | **Registration gas** | 115,316 | 1,745,658 | 941,744 | 115,264 |
 | **Announcement gas** | 28,067 | 67,730 | 67,700 | 66,970 |
@@ -32,6 +33,8 @@ P2 and P3 are both shown at ML-KEM-768, so a security-level difference is never 
 | Scan time per announcement | 30.71 µs | 28.23 µs | 29.28 µs | 28.20 µs |
 | Scan bytes per announcement | 224 B | 1,248 B | 1,248 B | 1,284 B |
 | Scan RPC round trips | 0 | 0 | 0 | 1 |
+
+R3's registration parity is an *on-chain* result. The 1,184-byte encapsulation key did not disappear — it is served off-chain and verified against the on-chain commitment before a sender may use it. That fetch is per recipient rather than per payment, so it caches, and it is paid in a sender's bandwidth rather than in anyone's gas. The cost it does carry is availability: a directory that will not answer blocks payments to that recipient, where R1's key is as available as Ethereum itself.
 
 Qualitative properties, from the protocol definitions:
 
@@ -44,6 +47,7 @@ Qualitative properties, from the protocol definitions:
 | Spendable on unmodified EVM | yes | **no** | yes |
 | Dual-key separation (view ≠ spend) | yes | yes | yes |
 | Quantum leak once an address spends | total | none | partial (Q1) |
+| Off-chain availability dependency | none | none | R3 only — key served off-chain |
 | ERC-5564 scheme id | 1 (standard) | 0x4D4C5745 (ours) | 0x50513348 (ours) |
 
 ## 2. Sizes

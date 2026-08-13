@@ -43,10 +43,26 @@ existing ERC-6538 deployment could serve R3 today without redeployment. That is
 a deployability result, not merely a cost one, and it is arguably the most
 practically useful thing in the study.
 
-The price is one added assumption: `ek_view` is served off-chain and the sender
-must verify it against the on-chain commitment before encapsulating. Skipping
-that check lets whoever serves the key substitute their own and read every
-payment.
+**The parity is an on-chain result, and must be stated as one.** The 1184-byte
+encapsulation key did not disappear; it is served off-chain and verified against
+the commitment before a sender may use it.
+
+| | Registered on-chain | Fetched off-chain |
+|---|---|---|
+| R1 | 1217 B | — |
+| R3 | 65 B | 1184 B, **per recipient** |
+
+The trade stays favourable for three reasons worth stating together: the fetch
+is per recipient rather than per payment so it caches; it is paid in a sender's
+bandwidth rather than anyone's gas, against 826,480 gas saved permanently; and a
+sender already reads the chain for a meta-address, so R3 adds a round trip
+rather than a new class of work.
+
+What it genuinely costs is **availability** — a directory that will not answer
+blocks payments to that recipient, where R1's key is as available as Ethereum.
+Integrity is fully protected by the commitment; a sender who skips the check is
+the one who loses, and `test_a_sender_who_skips_verification_is_the_one_who_loses`
+demonstrates exactly how.
 
 ---
 
