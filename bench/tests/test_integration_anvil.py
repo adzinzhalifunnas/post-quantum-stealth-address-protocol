@@ -175,8 +175,10 @@ class TestDeployment:
         projection = estimate_run_cost("anvil", samples=20)
         total_line = next(line for line in projection.splitlines() if line.startswith("TOTAL"))
         total_gas = int(total_line.split()[1].replace(",", ""))
-        # The measured full grid is ~103M gas; allow generous room either side.
-        assert 50_000_000 < total_gas < 200_000_000
+        # The measured full grid is ~209M gas, three quarters of it P2, whose
+        # 5600-byte meta-address follows Mikić et al. (JCST 2026, Table 5).
+        # Allow generous room either side.
+        assert 100_000_000 < total_gas < 400_000_000
 
     def test_cli_preflight_and_estimate_run_clean(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
