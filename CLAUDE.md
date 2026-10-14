@@ -10,9 +10,14 @@ waits on measurement — decide which lever actually dominates first.
 
 ## Positioning (verified Aug 2026 — don't re-litigate, do keep watching)
 
-- Mikić et al. (arXiv 2501.13733 / JCST 2026): MLWE SAP, stated by its own
-  authors to be not Ethereum-friendly. `0x3327/pq-sap` is Rust-only; their
-  ECC repo ships Foundry contracts. The EVM side is genuinely unbuilt.
+- Mikić et al., **JCST 2026** (doi 10.1080/23742917.2025.2611820) — the
+  version we cite; the preprint arXiv 2501.13733 is superseded. MLWE SAP with
+  a Kyber viewing key and a Dilithium-structured spending key. The authors
+  state that Ethereum deployment needs a Dilithium verification precompile and
+  a PQ address format, since Ethereum addresses are tied to ECDSA (§4.7,
+  §5.5). They quantify the on-chain footprint in **bytes only** (§6.5,
+  Table 5), never in gas. `0x3327/pq-sap` is Rust-only; their ECC repo ships
+  Foundry contracts. The EVM side is genuinely unbuilt.
 - Same authors, arXiv 2504.06744 (Apr 2025): Ethereum-friendly hybrid that
   **gives up quantum security** — MLWE for scan speed only. Closest prior
   work; cite and distinguish.
@@ -55,22 +60,22 @@ Meta-address sizes drive the whole cost story:
 | | Composition | Bytes | Announcement |
 |---|---|---|---|
 | P1 | M_spend ‖ M_view (33+33) | 66 | 33 B ephemeral pubkey |
-| P2 | ek_K ‖ ek_V (1184+1184) | 2368 | 1088 B ciphertext |
+| P2 | K_dilithium ‖ ek_V (4416+1184) | 5600 | 1088 B ciphertext |
 | P3 | M ‖ ek_view (33+1184) | 1217 | 1088 B ciphertext |
 
-P2 needs *two* lattice keypairs because both spending and viewing are
-lattice. P3 needs one, since spending stays secp256k1 — roughly **49%
-smaller before any registry optimisation**. P2 and P3 announcements are
+P2's spending key is an uncompressed Dilithium-structured key, 4416 bytes at
+NIST level 3 (journal §6.5, Table 5). P3 drops it entirely, since spending
+stays secp256k1 — roughly **78% smaller before any registry optimisation**. P2 and P3 announcements are
 identical in size, so P3's entire advantage lives in registration. That is
 why the registry variant is the artifact.
 
 ### P2 is data-plane only — this is a result, not a shortcut
 
-Mikić's stealth key is a lattice element: `P = XOF(ρ_K)·XOF(S) +
-Decompress(t_K,d_t)`, private key `p = k + XOF(S)`. That is not an Ethereum
-address and cannot sign an EVM transaction. This is exactly what the
-authors mean when they say the protocol needs Ethereum to become a PQ
-blockchain. End-to-end payment **cannot** be completed for P2, and
+Mikić's stealth key (journal §5.4–5.5) is a Dilithium-structured lattice key
+`t' = A·(s + k') + e'` whose private key is a Dilithium private key. That is
+not an Ethereum address and cannot sign an EVM transaction; the authors
+themselves say Ethereum deployment needs a Dilithium precompile and a PQ
+address format. End-to-end payment **cannot** be completed for P2, and
 demonstrating that concretely is a finding — better evidence than quoting
 their claim.
 
@@ -78,7 +83,8 @@ their claim.
 interface; computing their `P` needs full R_q arithmetic with NTT and would
 consume weeks. It is unnecessary because `P` never goes on-chain — the
 recipient computes it locally. To measure gas you need only correct sizes
-and encoding: real Kyber keys from liboqs, meta-address `ek_K ‖ ek_V`,
+and encoding: real Kyber viewing keys from liboqs, a 4416-byte
+uncompressed Dilithium-structured spending key, meta-address `K ‖ ek_V`,
 announcement of ciphertext + view tag. For off-chain scan performance, cite
 their published figures. State this boundary explicitly in the methodology:
 we implement their data plane to measure its EVM cost, not the full
@@ -102,7 +108,7 @@ pq-sap/
 │   ├── contracts/ERC6538Registry.sol  port the reference impl
 │   ├── scheme.py  tests/
 ├── p2_mlwe/
-│   ├── contracts/MLWERegistry.sol     2368-byte meta-address
+│   ├── contracts/MLWERegistry.sol     5600-byte meta-address
 │   ├── scheme.py  tests/  NOTES.md
 ├── p3_hybrid/
 │   ├── contracts/
@@ -124,7 +130,7 @@ identifier and `bench/` must import all three schemes.
 **What must stay shared, and why.** Every protocol imports `derive.py` and
 implements `scheme.py`; that is what forces identical address derivation.
 `StealthAnnouncer` is shared because `announce()` takes `bytes` and does
-not care whether the payload is 33, 1088, or 2368 bytes — it is the control
+not care whether the payload is 33, 768, or 1088 bytes — it is the control
 variable. Registries differ because they are what we study.
 `AnnouncerMinLog` lives inside P3 because it is itself an object of study,
 measured against the shared announcer. **Never give a protocol its own
@@ -240,8 +246,9 @@ immediately. **Report cumulative cost curves against payment count, not
 per-operation gas.** That curve is the result: where the design wins, where
 it doesn't, where the bottleneck migrates.
 
-**Q3 — scan speed against storage cost.** Mikić et al. found MLWE SAP ~66.8%
-faster to scan than Curvy. If ML-KEM decapsulation really beats secp256k1
+**Q3 — scan speed against storage cost.** Mikić et al. (journal §6.2) found
+MLWE SAP about 67% faster to scan than ECPDKSAP (the Curvy protocol), with
+Kyber512 + Dilithium. If ML-KEM decapsulation really beats secp256k1
 ECDH per announcement, PQ is *cheaper to scan but dearer to store*. Measure
 both directions; that tension is the headline finding.
 

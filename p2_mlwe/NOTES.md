@@ -1,9 +1,18 @@
-# P2 — implementation boundary and open questions
+# P2 — implementation boundary
 
-Reference: Marija Mikić, Mihajlo Srbakoski, Strahinja Praska, *Post-Quantum
-Stealth Address Protocols*, arXiv:2501.13733. Retrieved 2026-08-07 from
-<https://arxiv.org/abs/2501.13733> and the HTML full text at
-<https://arxiv.org/html/2501.13733v1>.
+Reference (peer-reviewed, the version cited in the thesis): Marija Mikić,
+Mihajlo Srbakoski, Strahinja Praška, *Post-quantum stealth address protocols*,
+Journal of Cyber Security Technology, published online 2026-01-08,
+doi:10.1080/23742917.2025.2611820. Received 2025-07-21, accepted 2025-12-22.
+
+The preprint (arXiv:2501.13733, January 2025) is superseded and is **not** the
+reference for anything in this module. It differs materially: there the
+spending key was a second Kyber key and the meta-address `ek_K ‖ ek_V` was 2368
+bytes at Kyber768; in the journal version the spending key is a
+Dilithium-structured Module-LWE key and the meta-address is 5600 bytes. Gas
+figures measured before this change (P2 registration 1,745,670 gas at 2368 B)
+belong to the preprint construction and must not be cited for the journal
+version.
 
 ## The boundary — state this explicitly in the methodology chapter
 
@@ -13,113 +22,95 @@ and it should appear in the thesis in roughly that form.
 
 What is real here:
 
-- Genuine ML-KEM keypairs and ciphertexts from liboqs, so every byte count and
-  every calldata content statistic is authentic.
-- Two lattice keypairs per recipient — spending and viewing — exactly as the
-  paper specifies, giving the meta-address `M = (K, V)`.
+- Genuine Kyber (ML-KEM) viewing keys and ciphertexts from liboqs, so the
+  viewing-key and announcement bytes are authentic.
+- The meta-address layout of the journal version, `MA = K ‖ V` (§5.4–5.5):
+  - `K`, the spending key, is a Dilithium-structured `t = A·s + e` kept
+    **uncompressed**, because `Power2Round` is not additively homomorphic and
+    the stealth key is derived by adding to `t`. At Dilithium NIST level 3 that
+    is 6 × 256 coefficients × 23 bits = **4416 bytes** (§6.5).
+  - `V` is a Kyber encapsulation key: 1184 bytes at Kyber768, 800 at Kyber512.
 - Real decapsulation on the scan path, so decapsulation counts and per-item
   timings are measured rather than modelled.
 
+What is a faithful stand-in:
+
+- The bytes of `K`. We rejection-sample 1536 coefficients uniformly modulo
+  q = 8380417 from SHAKE256 and pack them at 23 bits each, the uncompressed
+  layout of `t`. Under the Module-LWE assumption a real `t = A·s + e` is
+  indistinguishable from uniform, so length and byte statistics — the only
+  properties that drive storage and calldata cost — are faithful. No Dilithium
+  arithmetic is performed.
+
 What is deliberately absent:
 
-- The stealth key itself. The paper defines
-
-      P = XOF(ρ_K) · XOF(S) + Decompress_q(t_K, d_t)          p = k + XOF(S)
-
-  which requires full R_q arithmetic with NTT. liboqs exposes only the KEM
-  interface, so computing `P` would mean porting their polynomial arithmetic —
-  weeks of work for a value that **never goes on-chain**, since the recipient
-  computes it locally. Nothing we measure depends on it.
+- The stealth key `t' = A·(s + k') + e'` and its Dilithium private key. They
+  need full R_q arithmetic, never go on-chain (the recipient computes them
+  locally), and nothing we measure depends on them.
 - Their view-tag hash. See the deviation below.
 - Any spendable EVM account. `recover_spend_key` raises `NotEvmSpendable`.
 
-## Why P2 cannot complete a payment, and why that is a result
+## Why P2 cannot complete a payment on Ethereum today
 
-`p = k + XOF(S)` is an element of R_q. No secp256k1 scalar corresponds to it, so
-no Ethereum account is controlled by it and no EVM transaction can be signed for
-the stealth address. An end-to-end payment under this protocol requires Ethereum
-itself to become post-quantum.
+The stealth private key has the structure of a Dilithium private key (§5.5,
+step 5), so spending requires on-chain Dilithium verification. The authors
+state that in current Ethereum environments Dilithium verification is expensive
+without a dedicated precompile, that experimental on-chain verification incurs
+"extremely high gas costs, making it unsuitable for practical use", and that
+Ethereum's current address scheme is tied to ECDSA (§4.7, §5.5). An end-to-end
+payment therefore waits on protocol-level changes to Ethereum.
 
 `tests/test_p2_scheme.py::test_recover_raises_not_evm_spendable` asserts this.
-Demonstrating the limitation concretely is stronger evidence than quoting a
-claim about it, and it is the reason P2 appears in the comparison at all: it
-establishes what the post-quantum state of the art costs *and* what it cannot
-do, which together motivate P3.
 
 ## Documented deviations
 
-**Hash function for the view tag.** The paper uses SHA-256; we use keccak256,
-via the shared `pqsap_core.derive`. Both produce a one-byte tag from the shared
-secret, so the on-chain payload is byte-identical in size and statistically
-identical in content — the deviation cannot affect any gas figure. Using the
-shared derivation instead keeps P1, P2 and P3 on one code path, which is the
-fairness guarantee the whole comparison rests on. Off-chain scan timings differ
-by one hash of 32 bytes per announcement, which is negligible against a
-decapsulation but should be stated when reporting Q3.
+**Hash function for the view tag.** The paper computes the tag from a hash of
+the shared secret (SHA-256 given as an example); we use keccak256 via the shared
+`pqsap_core.derive`. Both produce a one-byte tag, so the on-chain payload is
+identical in size and statistically identical in content — the deviation cannot
+affect any gas figure. Off-chain scan timings differ by one 32-byte hash per
+announcement, negligible against a decapsulation.
 
 **Stealth-address field stand-in.** The shared announcer's ABI has an `address`
 argument and the real protocol has no Ethereum address to supply. We pass
-`keccak256("pqsap/p2/stealth-address-standin" ‖ S)[-20:]`.
-
-The alternative — passing the zero address — would be *cheaper on purpose*:
-twenty zero calldata bytes cost 4 gas each against 16 for non-zero, so P2 would
-appear roughly 240 gas per announcement cheaper than P1 and P3 for a reason that
-has nothing to do with its cryptography. A pseudorandom stand-in keeps the
-comparison honest. When reporting P2's announcement cost, note that a native
-MLWE SAP deployment would not carry this field at all, and that omitting it
-would save on the order of 320 gas of calldata per announcement (20 bytes × 16
-gas) plus the corresponding log data — quantify this from the measured figures
-rather than from this estimate.
+`keccak256("pqsap/p2/stealth-address-standin" ‖ S)[-20:]`. Passing the zero
+address would make P2 look roughly 240 gas per announcement cheaper for a reason
+unrelated to its cryptography (20 zero calldata bytes at 4 gas instead of 16).
 
 **Scan verification.** Our `scan` filters by view tag and then checks the
-stand-in address, which is a single hash. The real protocol's second step
-recomputes the lattice stealth key and compares it — an R_q operation we do not
-implement. **Measured P2 scan cost is therefore a lower bound on the real
-protocol's**, and Q3 must say so. The decapsulation count, which dominates, is
-exact.
+stand-in address, a single hash. The real protocol recomputes the lattice
+stealth key — an R_q operation we do not implement. **Measured P2 scan cost is
+therefore a lower bound on the real protocol's.** The decapsulation count, which
+dominates, is exact.
 
-## Parameter set — a decision the charter should be updated on
+## Parameter set
 
-The charter assumes P2 uses ML-KEM-768, giving a 2368-byte meta-address. The
-paper's own experiments use **Kyber512**: "All three algorithms (Kyber512,
-NewHope512, Frodo640) have the same security level, which corresponds
-approximately to AES128" — that is NIST level 1, not level 3.
+The paper's primary instantiation is **Kyber512** (§6.1), always combined with
+Dilithium at NIST level 3 for the spending key (§6.2, Table 5). `P2Mlwe` takes
+the Kyber parameter set as a constructor argument and we measure both readings:
 
-Both readings are defensible and they answer different questions, so `P2Mlwe`
-takes the parameter set as a constructor argument and we measure both:
+| Reading | Viewing key | Spending key | Meta-address | Announcement | Answers |
+|---|---|---|---|---|---|
+| Level-matched (default) | Kyber768 | Dilithium L3, 4416 B | 5600 B | 1088 B | What does P3 save at equal viewing-key security? |
+| Paper primary | Kyber512 | Dilithium L3, 4416 B | 5216 B | 768 B | What does the published instantiation cost on-chain? |
 
-| Reading | Parameter set | Meta-address | Announcement | Answers |
-|---|---|---|---|---|
-| Level-matched (default) | ML-KEM-768 | 2368 B | 1088 B | What does P3's design save at equal security? |
-| Paper-faithful | ML-KEM-512 | 1600 B | 768 B | What does the published protocol actually cost on-chain? |
+Both meta-address sizes reproduce the paper's Table 5 exactly. The
+level-matched run belongs in the headline comparison; the paper-primary run
+belongs alongside it so the reproduction is honest.
 
-The level-matched run is the one that belongs in the headline P1/P2/P3
-comparison, because comparing P2 at level 1 against P3 at level 3 would
-attribute a security difference to a design difference. The paper-faithful run
-belongs alongside it so the reproduction is honest. Note that the charter's
-"49% smaller before any registry optimisation" figure is a level-matched claim
-and holds only for the 768 row.
+## Points resolved against the journal version
 
-## Items to verify before the thesis cites them
-
-- **The 66.8% scan-time figure.** The abstract states MLWE SAP "outperforms
-  ECPDKSAP by approximately 66.8% in the scan time of the ephemeral public key
-  registry". The charter attributes this figure to a comparison against
-  **Curvy**. ECPDKSAP and Curvy are not obviously the same protocol, and one
-  automated reading of the full text conflated them. Resolve this against the
-  paper's own definitions before citing, and do not repeat the charter's
-  wording until it is confirmed. Unknown means unknown.
-- **The "not Ethereum-friendly" attribution.** The charter says the authors
-  state their protocol is not Ethereum-friendly. The full text of 2501.13733
-  does not appear to make that claim directly; it observes that Curvy is
-  compatible with Ethereum without claiming the same for MLWE SAP. The explicit
-  statement may belong to the companion paper, arXiv:2504.06744. Locate the
-  exact sentence and cite the paper it actually appears in.
-- **View-tag width.** The paper uses one byte, and notes a larger tag trades
-  registry size for scan speed. Our one-byte tag matches. Confirm whether their
-  reported timings use the one-byte variant before comparing against them.
-- **Their exact registry entry encoding.** We assume `ek_K ‖ ek_V` with no
-  framing overhead, which is the most favourable reading for P2. If the paper
-  specifies additional fields, P2's registration cost rises and the comparison
-  moves further in P3's favour — so this assumption is conservative, but it
-  should still be checked.
+- **Scan-time figure.** The journal reports "approximately 67%" improvement for
+  80,000 announcements against ECPDKSAP, which §6.2 identifies as the Curvy
+  protocol (Protocol 3 of their earlier paper), with Kyber512 + Dilithium and a
+  1-byte view tag. Cite it as "about 67%", not 66.8% (the preprint's figure).
+- **Ethereum compatibility.** The phrase "not Ethereum-friendly" is from the
+  preprint and does not appear in the journal. Cite the journal's own statements
+  about the Dilithium precompile and ECDSA-bound addresses instead (§4.7, §5.5).
+- **View-tag width.** One byte by default (§4.2), as here.
+- **Registry entry encoding.** Table 5 sizes are the raw concatenation of the
+  two keys with no framing, which is what we register.
+- **Note for citing:** the paper calls the level-3 parameter set "Dilithium2
+  (NIST security level 3)" in §5.4; in the Dilithium specification Dilithium2 is
+  level 2 and Dilithium3 is level 3. The sizes in Table 5 correspond to level 3
+  (k = 6), which is what we implement.

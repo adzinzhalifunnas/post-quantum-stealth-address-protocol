@@ -25,7 +25,10 @@ winner**.
 | P1, ERC-6538 reference | 66 B | 115,316 | — | full |
 | P3 R3, commitment | 65 B | 115,264 | 1.00× | M only |
 | P3 R1, full meta-address | 1217 B | 941,744 | 8.17× | full |
-| P2, two lattice keys | 2368 B | 1,745,670 | 15.14× | full |
+| P2, preprint construction (superseded) | 2368 B | 1,745,670 | 15.14× | full |
+
+The P2 row was measured on the preprint's two-Kyber-key construction. The
+journal version registers 5600 bytes; re-measure before citing any P2 figure.
 
 **Storing 65 bytes costs more than emitting 1217.** R3 registers nineteen times
 fewer bytes than R2 and still costs 62% more, because cold `SSTORE` is 20,000
@@ -198,8 +201,8 @@ and 20.0% at a hundred.
 The tension the charter predicted is real: P3 scans 1.05× faster while storing
 5.6× the bytes. At ML-KEM-512 it is 1.35× faster.
 
-**But the margin is far narrower than Mikić et al.'s 66.8%, and the baselines
-differ.** Their figure is against ECPDKSAP, which is pairing-based and much
+**But the margin is far narrower than Mikić et al.'s "about 67%" (journal
+§6.2), and the baselines differ.** Their figure is against ECPDKSAP, which is pairing-based and much
 slower than the plain secp256k1 ECDH that ERC-5564 actually uses. The two
 numbers are not comparable and should not be presented as though they were.
 
@@ -233,19 +236,23 @@ an elliptic-curve operation on every announcement rather than one in 256.
 Recorded rather than silently applied, since the charter marks these settled and
 changing them needs advisor sign-off. All four are in `p2_mlwe/NOTES.md`.
 
-**P2's parameter set.** The paper's own experiments use Kyber512 (NIST level 1),
-not the ML-KEM-768 the charter assumes. Both are now measured: 768 for a
-level-matched comparison against P3, 512 to reproduce the published protocol.
-Comparing P2 at level 1 against P3 at level 3 would attribute a security
-difference to a design difference.
+**Superseded by the journal version (2026-10-14).** The thesis now cites the
+peer-reviewed journal version (JCST 2026, doi 10.1080/23742917.2025.2611820),
+not the preprint. Consequences:
 
-**The 66.8% attribution.** The abstract credits it to ECPDKSAP; the charter
-credits it to Curvy. Unresolved — do not cite until checked against the paper's
-own definitions.
-
-**The "not Ethereum-friendly" claim.** Does not appear in arXiv:2501.13733. May
-belong to the companion paper arXiv:2504.06744. Locate the exact sentence before
-citing.
+- **P2's construction changed.** The journal's spending key is an uncompressed
+  Dilithium-structured key (4416 B), so the meta-address is 5600 B at Kyber768
+  and 5216 B at Kyber512 (Table 5), not 2368/1600. `p2_mlwe` now implements
+  this; every P2 registration figure in this document predates the change and
+  must be re-measured before it is cited.
+- **P2's parameter set.** The paper's primary instantiation is Kyber512 with
+  Dilithium level 3. Both Kyber512 and Kyber768 are measured.
+- **The 67% figure.** The journal reports "approximately 67%" against
+  ECPDKSAP, which its §6.2 identifies as the Curvy protocol. Resolved.
+- **"Not Ethereum-friendly."** That sentence is in the preprint (§6.2) — an
+  earlier note here wrongly said it was absent — but it does not appear in the
+  journal. Cite the journal's statements on the Dilithium precompile and the
+  ECDSA-bound address scheme (§4.7, §5.5) instead.
 
 **The ~31-payment crossover estimate.** Measured at 19.7 for R1+A1, because the
 charter's ~26k per announcement counted calldata and log bytes only, omitting

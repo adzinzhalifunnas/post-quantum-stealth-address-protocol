@@ -20,9 +20,10 @@ today, whereas the announcement metadata is permanently public and can never be
 re-encrypted — so harvest-now-decrypt-later applies to the linkage, and that is
 what this protocol protects.
 
-Compared with a fully lattice-based scheme, one keypair becomes a lattice
-keypair instead of two: 1217 bytes of meta-address against 2368. Announcements
-are identical in size, so P3's entire advantage lives in registration.
+Compared with MLWE SAP (Mikić et al., JCST 2026), only the viewing key is
+lattice-based and the 4416-byte Dilithium-structured spending key disappears:
+1217 bytes of meta-address against 5600. Announcements are identical in size,
+so P3's entire advantage lives in registration.
 
 **The address check is mandatory.** FIPS 203 uses implicit rejection, so
 ``Decaps`` never fails — a foreign ciphertext returns 32 pseudorandom bytes and

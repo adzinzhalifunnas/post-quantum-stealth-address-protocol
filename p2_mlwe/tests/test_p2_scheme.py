@@ -1,9 +1,10 @@
-"""P2 data-plane tests.
+"""P2 data-plane tests (journal version of Mikić et al., JCST 2026).
 
 The important one is ``test_recover_raises_not_evm_spendable``: it is the
 concrete demonstration that MLWE SAP cannot complete a payment on an unmodified
 EVM chain. That is a finding the thesis reports, not a shortcoming of this
-implementation — see NOTES.md for the boundary statement.
+implementation — see NOTES.md for the boundary statement. The size tests pin
+the registered meta-address to the paper's Table 5.
 """
 
 from __future__ import annotations
@@ -13,7 +14,13 @@ from pqsap_core import kem, testing
 from pqsap_core.derive import DeriveError
 from pqsap_core.scheme import MetaAddress, NotEvmSpendable, ScanMatch
 
-from p2_mlwe.scheme import SPEND_KEY_EXTRA, P2Mlwe
+from p2_mlwe.scheme import (
+    DILITHIUM_Q,
+    SPEND_KEY_EXTRA,
+    SPEND_PK_LEN,
+    P2Mlwe,
+    unpack_spend_pk,
+)
 
 SAMPLES = 20
 
@@ -28,50 +35,66 @@ def test_scheme_id_is_non_standard(scheme: P2Mlwe) -> None:
     assert scheme.scheme_id == 0x4D4C5745  # "MLWE"
 
 
-def test_level_matched_sizes(scheme: P2Mlwe) -> None:
-    """Default is ML-KEM-768, so P2 and P3 are compared at equal security."""
-    assert scheme.meta_len == 2 * kem.ML_KEM_768.ek_len == 2368
+def test_spending_key_is_uncompressed_dilithium_level3() -> None:
+    """6 x 256 coefficients at 23 bits: the 4416 bytes the paper reports (§6.5)."""
+    assert SPEND_PK_LEN == 6 * 256 * 23 // 8 == 4416
+
+
+def test_level_matched_sizes_match_table_5(scheme: P2Mlwe) -> None:
+    """Default is Kyber768 + Dilithium level 3: 5600 B, as in the paper's Table 5."""
+    assert scheme.meta_len == SPEND_PK_LEN + kem.ML_KEM_768.ek_len == 5600
     assert scheme.payload_len == kem.ML_KEM_768.ct_len == 1088
 
     keys = scheme.keygen()
-    assert len(keys.meta.payload) == 2368
+    assert len(keys.meta.payload) == 5600
     assert len(scheme.announce(keys.meta).payload) == 1088
 
 
-def test_paper_faithful_sizes() -> None:
-    """The paper's own experiments used Kyber512; NOTES.md records both."""
+def test_paper_primary_sizes_match_table_5() -> None:
+    """The paper's primary instantiation is Kyber512 + Dilithium level 3: 5216 B."""
     paper = P2Mlwe(kem.ML_KEM_512)
-    assert paper.meta_len == 2 * 800 == 1600
+    assert paper.meta_len == SPEND_PK_LEN + 800 == 5216
     assert paper.payload_len == 768
     assert paper.param_set == "mlkem512"
 
 
-def test_meta_is_twice_p3s_lattice_material(scheme: P2Mlwe) -> None:
-    """Two lattice keypairs against P3's one — the source of P3's advantage."""
+def test_spending_key_coefficients_are_valid(scheme: P2Mlwe) -> None:
+    """Every packed coefficient lies in [0, q), so the bytes are a well-formed t."""
+    keys = scheme.keygen(b"p2-coeffs")
+    spend_pk, _ = scheme.split_meta(keys.meta)
+    coeffs = unpack_spend_pk(spend_pk)
+    assert len(coeffs) == 6 * 256
+    assert all(0 <= c < DILITHIUM_Q for c in coeffs)
+    # Pseudorandom content: zero bytes near 1/256, not a flattering all-zero key.
+    assert spend_pk.count(0) / len(spend_pk) < 0.02
+
+
+def test_p3_meta_is_under_a_quarter_of_p2s(scheme: P2Mlwe) -> None:
+    """P3 keeps spending on secp256k1, so it carries no 4416-byte Dilithium key."""
     from p3_hybrid.scheme import P3Hybrid
 
     p3 = P3Hybrid()
-    assert scheme.meta_len == 2368
+    assert scheme.meta_len == 5600
     assert p3.meta_len == 1217
     # Announcements are identical, so registration is where P3 wins.
     assert scheme.payload_len == p3.payload_len
     reduction = 1 - p3.meta_len / scheme.meta_len
-    assert 0.48 < reduction < 0.49  # the charter's "roughly 49% smaller"
+    assert 0.78 < reduction < 0.79  # 1 - 1217/5600 ≈ 78.3%
 
 
 def test_recover_raises_not_evm_spendable(scheme: P2Mlwe) -> None:
     """The finding: MLWE SAP's stealth key cannot sign an EVM transaction.
 
-    p = k + XOF(S) is an element of R_q. No Ethereum account corresponds to it,
-    so an end-to-end payment cannot be completed without Ethereum itself
-    becoming post-quantum.
+    The stealth key is a Dilithium-structured lattice key. No Ethereum account
+    corresponds to it, and spending needs on-chain Dilithium verification that
+    Ethereum lacks without a precompile — as the authors state (§4.7, §5.5).
     """
     keys = scheme.keygen()
     announcement = scheme.announce(keys.meta)
     matches = scheme.scan(scheme.viewing_keys(keys), [announcement])
     assert len(matches) == 1
 
-    with pytest.raises(NotEvmSpendable, match="lattice element"):
+    with pytest.raises(NotEvmSpendable, match="Dilithium-structured lattice key"):
         scheme.recover_spend_key(keys, matches[0])
 
 
@@ -92,14 +115,15 @@ def test_scan_rejects_foreign(scheme: P2Mlwe) -> None:
 
 
 def test_dual_key_separation(scheme: P2Mlwe) -> None:
-    """Viewing keys carry dk_view only; dk_spend never leaves RecipientKeys."""
+    """Viewing keys carry dk_view only; the spending secret never leaves RecipientKeys."""
     testing.check_dual_key_separation(scheme)
 
     keys = scheme.keygen()
     viewing = scheme.viewing_keys(keys)
-    dk_spend = keys.extra[SPEND_KEY_EXTRA]
-    assert viewing.view_secret != dk_spend
-    assert dk_spend not in (viewing.view_secret, viewing.meta.payload)
+    spend_secret = keys.extra[SPEND_KEY_EXTRA]
+    assert viewing.view_secret != spend_secret
+    assert spend_secret not in viewing.view_secret
+    assert spend_secret not in viewing.meta.payload
 
 
 def test_announcement_shape(scheme: P2Mlwe) -> None:
@@ -123,10 +147,11 @@ def test_stealth_address_standin_is_not_zero(scheme: P2Mlwe) -> None:
     assert zero_fraction < 0.05  # expected ~1/256
 
 
-def test_two_independent_lattice_keypairs(scheme: P2Mlwe) -> None:
+def test_spending_and_viewing_keys_are_distinct(scheme: P2Mlwe) -> None:
     keys = scheme.keygen()
-    ek_spend, ek_view = scheme.split_meta(keys.meta)
-    assert ek_spend != ek_view
+    spend_pk, ek_view = scheme.split_meta(keys.meta)
+    assert len(spend_pk) == SPEND_PK_LEN
+    assert len(ek_view) == kem.ML_KEM_768.ek_len
     assert keys.extra[SPEND_KEY_EXTRA] != keys.view_secret
 
 

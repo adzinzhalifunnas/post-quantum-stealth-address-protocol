@@ -92,9 +92,12 @@ That sends nothing. It prices every call against the deployed contracts at the
 current gas price, compares the total to your balance, and tells you plainly
 whether you are short. Run it again immediately before measuring.
 
-Where the gas goes, if you need to economise: P2 is about 61% of the budget,
-because a fully post-quantum meta-address is 2368 bytes and every one of its 75
-storage slots is a cold write. P1 is under 3%.
+Where the gas goes, if you need to economise: P2 is by far the largest share
+of the budget, because its meta-address (Mikić et al., JCST 2026, Table 5) is
+5600 bytes and every one of its 176 storage slots (175 data + 1 length) is a
+cold write. The earlier "about 61%" figure was computed for the preprint's
+2368-byte meta-address and no longer applies — re-run the budget estimator
+above for the current figure. P1 is a small fraction.
 
 **On stranded funds.** Each sample uses a fresh account, and the harness sweeps
 whatever that account did not spend back to the deployer. Without sweeping, a

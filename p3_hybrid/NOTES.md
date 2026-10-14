@@ -15,7 +15,7 @@ disappears. **It does.**
 | P1, ERC-6538 reference | 66 B | 115,316 |
 | **P3 R3, commitment** | **65 B** | **115,264** |
 | P3 R1, full meta-address | 1217 B | 941,744 |
-| P2, two lattice keys | 2368 B | 1,745,670 |
+| P2, preprint construction (superseded; re-measure at 5600 B) | 2368 B | 1,745,670 |
 
 R3 is 52 gas *cheaper* than an ordinary ERC-5564 registration — not
 approximately equal, marginally better, because 65 bytes is one byte less than

@@ -4,13 +4,16 @@ pragma solidity 0.8.28;
 import {IStealthRegistry} from "../../shared/contracts/IStealthRegistry.sol";
 
 /// @title MLWERegistry — P2's registry
-/// @notice Stores an MLWE SAP meta-address: two lattice encapsulation keys.
-/// @dev The recipient in Mikić et al.'s protocol holds *two* lattice keypairs,
-///      one spending and one viewing, so the registered payload is `ek_K ‖ ek_V`:
-///      2368 bytes at ML-KEM-768, or 1600 at the ML-KEM-512 parameter set the
-///      paper's own experiments use. At 32 bytes per storage slot that is 74 or
-///      50 slots of cold `SSTORE`, plus a length slot — which is why
-///      registration dominates this protocol's cost profile.
+/// @notice Stores an MLWE SAP meta-address: a Dilithium-structured spending key
+///         and a Kyber viewing key.
+/// @dev Follows the journal version of Mikić et al. (JCST 2026, §5.4–5.5, §6.5).
+///      The recipient's meta-address is `K ‖ V`: an uncompressed
+///      Dilithium-structured spending key `K` (4416 bytes at NIST level 3) and a
+///      Kyber encapsulation key `V`. That is 5600 bytes with Kyber768, or 5216
+///      with Kyber512, the paper's primary instantiation — the figures in the
+///      paper's Table 5. At 32 bytes per storage slot that is 175 or 163 slots of
+///      cold `SSTORE`, plus a length slot — which is why registration dominates
+///      this protocol's cost profile.
 ///
 ///      `registerKeys` is byte-identical to ERC-6538's, deliberately. The whole
 ///      point of the comparison is that the three registries differ *only* in
@@ -31,7 +34,7 @@ contract MLWERegistry is IStealthRegistry {
     /// @notice Emitted when a registrant sets their stealth meta-address.
     /// @param registrant The account that registered.
     /// @param schemeId Identifier corresponding to the applied stealth address scheme.
-    /// @param stealthMetaAddress The concatenated encapsulation keys, `ek_K ‖ ek_V`.
+    /// @param stealthMetaAddress The concatenated keys, `K ‖ V`.
     event StealthMetaAddressSet(
         address indexed registrant, uint256 indexed schemeId, bytes stealthMetaAddress
     );

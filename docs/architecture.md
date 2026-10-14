@@ -51,7 +51,7 @@ differing between measurements is the payload.
 | Contract | Protocol | Payload | Bytes |
 |---|---|---|---|
 | `ERC6538Registry` | P1 | `M_spend ‖ M_view` | 66 |
-| `MLWERegistry` | P2 | `ek_K ‖ ek_V` | 2368 |
+| `MLWERegistry` | P2 | `K_dilithium ‖ ek_V` | 5600 |
 | `RegistryFull` (R1) | P3 | `M ‖ ek_view` | 1217 |
 | `RegistryCommit` (R3) | P3 | `M ‖ keccak256(ek_view)` | 65 |
 

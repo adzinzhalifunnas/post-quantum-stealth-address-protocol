@@ -16,8 +16,8 @@ import {IStealthRegistry} from "../../shared/contracts/IStealthRegistry.sol";
 ///      does, the registration penalty for post-quantum unlinkability disappears
 ///      entirely and the remaining cost gap is purely the announcement.
 ///
-///      Half of P2's 2368 bytes, because P3 keeps spending on secp256k1 and so
-///      needs one lattice keypair where a fully post-quantum scheme needs two.
+///      Under a quarter of P2's 5600 bytes, because P3 keeps spending on
+///      secp256k1 and so carries no 4416-byte Dilithium-structured spending key.
 ///      Announcements are identical in size between the two, so this is where
 ///      P3's entire advantage over the post-quantum state of the art lives.
 ///

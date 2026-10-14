@@ -54,8 +54,8 @@ class MetaAddress:
     """What a recipient publishes to the registry.
 
     ``payload`` is the exact byte string that goes on-chain, so its length is
-    the registration cost driver: 66 bytes for P1, 2368 for P2, 1217 for P3 at
-    ML-KEM-768.
+    the registration cost driver: 66 bytes for P1, 5600 for P2 (Kyber768 +
+    Dilithium-structured key, Mikić et al. 2026), 1217 for P3 at ML-KEM-768.
     """
 
     scheme_id: int

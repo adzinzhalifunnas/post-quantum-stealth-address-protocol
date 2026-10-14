@@ -35,7 +35,8 @@ def test_slot_count_rounds_up_and_includes_length_slot() -> None:
     by_key = {(r.protocol, r.param_set): r for r in sizes.size_rows()}
     assert by_key[("p3_hybrid", "mlkem768")].meta_slots == 40
     assert by_key[("p1_erc5564", "secp256k1")].meta_slots == 4
-    assert by_key[("p2_mlwe", "mlkem768")].meta_slots == 75
+    # 5600 bytes (Mikić et al., JCST 2026, Table 5): 175 data slots plus length.
+    assert by_key[("p2_mlwe", "mlkem768")].meta_slots == 176
 
 
 def test_p2_and_p3_announcements_are_the_same_size() -> None:

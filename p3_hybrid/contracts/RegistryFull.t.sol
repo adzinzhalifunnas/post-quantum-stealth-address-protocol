@@ -23,13 +23,14 @@ contract RegistryFullTest is RegistryBehaviourTest {
     }
 
     /// @dev Sanity-checks the size relationship the thesis reports: P3 registers
-    ///      roughly half of what a fully post-quantum scheme must, because
-    ///      spending stays on secp256k1. Announcements are identical, so this is
-    ///      where the advantage lives.
-    function test_metaAddressIsAboutHalfOfP2() public pure {
-        uint256 p2 = 2368;
+    ///      under a quarter of what MLWE SAP (Mikić et al., JCST 2026, Table 5)
+    ///      must, because spending stays on secp256k1 and P3 carries no
+    ///      4416-byte Dilithium-structured key. Announcements are identical, so
+    ///      this is where the advantage lives.
+    function test_metaAddressIsUnderAQuarterOfP2() public pure {
+        uint256 p2 = 5600;
         uint256 p3 = 1217;
-        assertLt(p3 * 2, p2 + 100);
-        assertGt(p3 * 2, p2 - 100);
+        assertLt(p3 * 4, p2);
+        assertGt(p3 * 5, p2);
     }
 }

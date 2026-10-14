@@ -11,7 +11,7 @@ pragma solidity 0.8.28;
 ///
 ///      Payload semantics per implementation:
 ///      - P1 (ERC6538Registry): M_spend ‖ M_view                   66 bytes
-///      - P2 (MLWERegistry):    ek_K ‖ ek_V                       2368 bytes
+///      - P2 (MLWERegistry):    K_dilithium ‖ ek_V                5600 bytes
 ///      - P3 R1 (RegistryFull): M ‖ ek_view                       1217 bytes
 ///      - P3 R3 (RegistryCommit, M5): M ‖ keccak256(ek_view)        65 bytes
 ///
