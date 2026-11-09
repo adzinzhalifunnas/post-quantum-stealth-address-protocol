@@ -108,13 +108,16 @@ exactly on that floor:
 
 | | Calldata tokens | EIP-7623 floor | Actual gas |
 |---|---|---|---|
-| A1 shared announcer | 4,673 | 67,730 | 67,730 |
+| A1 shared announcer | 4,676 | 67,760 | 67,760 |
 | A2 minimal log | 4,600 | 67,000 | 67,000 |
 
-Exact match. Below the floor, execution gas is free, so the ~9,984 gas of log
-data A2 removes buys **nothing at all**. The 730 gas it does save decomposes
-exactly to 73 fewer calldata tokens — an ABI artifact, since a `bytes1` view tag
-needs no offset and length words. Not one gas of it comes from the log.
+The median rows at ML-KEM-768, from `bench/results/gas_anvil.csv`. Exact match.
+Below the floor, execution gas is free, so the ~9,984 gas of log data A2 removes
+buys **nothing at all**. What A2 does save is structural: for the same payload
+its calldata is 64 bytes and exactly 73 tokens shorter, 730 gas, because a
+`bytes1` view tag needs no offset and length words. That is an ABI artifact, and
+not one gas of it comes from the log. The medians differ by 760 rather than 730
+only because they are different random ciphertexts, one zero byte apart.
 
 Every post-quantum announcement measured is floor-bound, at both parameter sets
 under both announcers. P1's 33-byte announcement is not, which is why the
@@ -154,8 +157,9 @@ The charter prepares for the honest possibility that *even fully optimised, P3
 announcements may stay an order of magnitude above P1, making the protocol
 viable on L2 but not L1.*
 
-Measured, the gap is **2.39× on total transaction cost**, or 6.6× net of the
-21,000 gas intrinsic cost. Not an order of magnitude in either framing.
+Measured, the gap is **2.39× on total transaction cost**, or 6.5× net of the
+21,000 gas intrinsic cost (46,000 against 7,067). Not an order of magnitude in
+either framing.
 
 The reason is instructive: byte ratios badly overstate gas ratios at these
 sizes, because fixed costs dominate. P3's announcement payload is 33× P1's and
@@ -176,9 +180,9 @@ cost:
 | Variant | Register | Announce | Crossover |
 |---|---|---|---|
 | P1 ERC-5564 | 94,316 | 7,067 | 13.3 |
-| P3 R1 + A1 (768) | 920,744 | 46,730 | 19.7 |
+| P3 R1 + A1 (768) | 920,744 | 46,760 | 19.7 |
 | **P3 R3 + A2 (768)** | **94,264** | **46,000** | **2.0** |
-| P3 R3 + A2 (512) | 94,264 | 33,200 | 2.8 |
+| P3 R3 + A2 (512) | 94,264 | 33,230 | 2.8 |
 
 Under R1 a recipient pays a large one-off cost that announcements only overtake
 after twenty payments. Under R3 the one-off cost is an ordinary ERC-5564
@@ -199,12 +203,19 @@ cumulative cost is 0.182M gas against 4.132M after one payment, 0.785M against
 
 | Protocol | Params | µs/announcement | Bytes/announcement |
 |---|---|---|---|
-| P1 ERC-5564 | secp256k1 | 30.71 | 224 |
-| P3 hybrid | mlkem768 | 29.28 | 1,248 |
-| P3 hybrid | mlkem512 | 23.31 | 928 |
+| P1 ERC-5564 | secp256k1 | 29.30 | 224 |
+| P3 hybrid | mlkem768 | 26.88 | 1,248 |
+| P3 hybrid | mlkem512 | 21.31 | 928 |
 
-The tension the charter predicted is real: P3 scans 1.05× faster while storing
-5.6× the bytes. At ML-KEM-512 it is 1.35× faster.
+The tension the charter predicted is real: P3 scans 1.09× faster while storing
+5.6× the bytes. At ML-KEM-512 it is 1.38× faster (`bench/results/scan.csv`,
+measured at 84e512b).
+
+**The speed margin is of the same order as run-to-run drift.** P1 and P2 at
+ML-KEM-768, whose scan code did not change, measured 1.40 and 1.22 µs faster here
+than in the previous `scan.csv`, which put P3 at 1.05× and 1.32×. Both runs have
+P3 ahead, but a thesis figure for the ratio needs repeated runs and a spread,
+not one run.
 
 **But the margin is far narrower than Mikić et al.'s "about 67%" (journal
 §6.2), and the baselines differ.** Their figure is against ECPDKSAP, which is pairing-based and much
@@ -282,10 +293,12 @@ integer costs 10.9 µs where a random 256-bit viewing key costs 25.2 µs.
 Benchmarking P1 with a toy scalar understates it by more than half and would
 have **inverted the Q3 conclusion**.
 
-**Content-dependent gas is real, not theoretical.** One R3 registration in
-twenty came in 20,000 gas cheaper — its payload's last byte was zero, so the
-final storage word was all zeros and Solidity skipped a cold `SSTORE`.
-Probability 1/256. This is the charter's pitfall made concrete and the argument
+**Content-dependent gas is real, not theoretical.** In the `anvil-final` run
+(committed in 27769e0) one R3 registration in twenty came in 20,000 gas cheaper
+— its payload's last byte was zero, so the final storage word was all zeros and
+Solidity skipped a cold `SSTORE`. Probability 1/256. Its recorded seed,
+`anvil-final/p3_hybrid/mlkem768/0018`, regenerates the zero byte. The current
+run's 40 R3 registrations contain no such case. This is the charter's pitfall made concrete and the argument
 for both of its rules at once: sample at least twenty distinct keypairs, and
 report the median rather than the mean.
 

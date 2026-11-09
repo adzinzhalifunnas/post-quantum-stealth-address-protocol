@@ -20,7 +20,7 @@ disappears. **It does.**
 R3 is 52 gas *cheaper* than an ordinary ERC-5564 registration — not
 approximately equal, marginally better, because 65 bytes is one byte less than
 66. Registering a post-quantum viewing key costs what registering an ECC one
-costs. Against R1 the saving is 87.7%.
+costs. Against R1 the saving is 87.8%.
 
 Two further points worth making in the thesis:
 
@@ -36,8 +36,12 @@ a deployability result, not merely a cost one.
 
 ### An outlier that justifies the sampling rule
 
-One R3 sample in twenty registered for 95,340 gas instead of 115,264 — almost
-exactly one cold `SSTORE` less. It is not noise, and it is not an error.
+In the `anvil-final` run (committed in 27769e0), one R3 sample in twenty
+registered for 95,340 gas instead of 115,264 — almost exactly one cold `SSTORE`
+less. It is not noise, and it is not an error. Its recorded seed,
+`anvil-final/p3_hybrid/mlkem768/0018`, regenerates the keypair, and the last byte
+of its commitment is zero. The current run's 40 R3 registrations contain no
+such case.
 
 R3's payload is 65 bytes, so Solidity stores it as a length slot plus three data
 words, the third holding a single meaningful byte and 31 bytes of zero padding.
@@ -104,7 +108,8 @@ The charter expects A2 — full ciphertext in calldata, minimal log — to take
 "roughly a third off the recurring cost", reasoning that ERC-5564 pays for the
 payload twice, at 16 gas/byte as calldata and 8 gas/byte as log data.
 
-Measured, A2 saves **730 gas of 67,730: 1.1%.**
+Measured, A2's median is **760 gas below A1's 67,760: 1.1%.** 730 of that is
+structural; the other 30 is sampling noise (below).
 
 That reasoning was correct before Pectra. **EIP-7623 changed it.** A transaction
 now pays at least a floor set by its calldata alone — one token per zero byte,
@@ -114,11 +119,14 @@ computationally trivial, so they sit exactly on that floor:
 
 | | Calldata tokens | EIP-7623 floor | Actual gas |
 |---|---|---|---|
-| A1 shared announcer | 4,673 | 67,730 | 67,730 |
+| A1 shared announcer | 4,676 | 67,760 | 67,760 |
 | A2 minimal log | 4,600 | 67,000 | 67,000 |
 
-The match is exact, and the 730-gas difference decomposes exactly too: 73 fewer
-tokens × 10 gas. **None of it comes from removing the log.** The ~9,984 gas of
+The match is exact. For the same payload, A2's calldata is 64 bytes and exactly
+73 tokens shorter than A1's, so its structural saving is 730 gas: 73 tokens × 10
+gas. The two medians differ by 760 only because they are different random
+ciphertexts, one zero byte (30 gas) apart. **None of it comes from removing the
+log.** The ~9,984 gas of
 log data A2 eliminates is absorbed entirely by the floor. A2's saving is an ABI
 artifact — a `bytes1` view tag needs no offset and length words, unlike ERC-5564's
 dynamic `bytes` metadata — and would be obtained just as well by keeping the log
@@ -135,8 +143,8 @@ ERC-5564 correctly and stops describing P3.
 execution gas — smaller logs, cheaper storage, tighter code — is invisible while
 the floor binds. This reframes the recurring-cost story entirely:
 
-- The ML-KEM parameter set is the real lever. 768 → 512 takes an announcement
-  from 67,730 to 54,930, a 19% saving, against A2's 1.1%. That is a genuine
+- The ML-KEM parameter set is the real lever. 768 → 512 takes an A1
+  announcement from 67,760 to 54,900, a 19% saving, against A2's 1.1%. That is a genuine
   security-versus-cost trade-off, NIST category 3 against category 1, and it is
   now the only announcement-side decision that matters.
 - Compression is not an option and never was: Kyber ciphertexts are
@@ -162,9 +170,9 @@ overtake registration:
 | Variant | Register | Announce | Crossover |
 |---|---|---|---|
 | P1 ERC-5564 | 94,316 | 7,067 | 13.3 |
-| P3 R1 + A1 (768) | 920,744 | 46,730 | 19.7 |
+| P3 R1 + A1 (768) | 920,744 | 46,760 | 19.7 |
 | **P3 R3 + A2 (768)** | **94,264** | **46,000** | **2.0** |
-| P3 R3 + A2 (512) | 94,264 | 33,200 | 2.8 |
+| P3 R3 + A2 (512) | 94,264 | 33,230 | 2.8 |
 
 R3 moves the bottleneck decisively. Under R1 a recipient pays a large one-off
 cost and announcements only overtake it after twenty payments; under R3 the
