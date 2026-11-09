@@ -25,10 +25,13 @@ winner**.
 | P1, ERC-6538 reference | 66 B | 115,316 | — | full |
 | P3 R3, commitment | 65 B | 115,264 | 1.00× | M only |
 | P3 R1, full meta-address | 1217 B | 941,744 | 8.17× | full |
-| P2, preprint construction (superseded) | 2368 B | 1,745,670 | 15.14× | full |
+| P2, MLWE SAP, Kyber512 | 5216 B | 3,788,933 | 32.86× | full |
+| P2, MLWE SAP, Kyber768 | 5600 B | 4,064,437 | 35.25× | full |
 
-The P2 row was measured on the preprint's two-Kyber-key construction. The
-journal version registers 5600 bytes; re-measure before citing any P2 figure.
+P3 rows are at ML-KEM-768; R3 costs the same at both sets. P2 is the journal
+construction (JCST 2026, Table 5): a 4416-byte Dilithium-structured spending key
+alongside the Kyber viewing key, measured at both parameter sets. Gas and ratios
+from `bench/results/report_anvil.md`, sections 3 and 4.
 
 **Storing 65 bytes costs more than emitting 1217.** R3 registers nineteen times
 fewer bytes than R2 and still costs 62% more, because cold `SSTORE` is 20,000
@@ -185,8 +188,10 @@ registration and announcements dominate after two.
 That is the sentence the results chapter builds to, and it reframes what future
 optimisation work should target.
 
-Against the post-quantum state of the art, P3 R3+A2 saves 89.9% at one payment
-and 20.0% at a hundred.
+Against the post-quantum state of the art, P2 at Kyber768, P3 R3+A2's
+cumulative cost is 0.182M gas against 4.132M after one payment, 0.785M against
+4.741M after ten, and 6.815M against 10.834M after a hundred
+(`bench/results/report_anvil.md`, sections 1 and 5).
 
 ---
 
@@ -247,9 +252,10 @@ not the preprint. Consequences:
 
 - **P2's construction changed.** The journal's spending key is an uncompressed
   Dilithium-structured key (4416 B), so the meta-address is 5600 B at Kyber768
-  and 5216 B at Kyber512 (Table 5), not 2368/1600. `p2_mlwe` now implements
-  this; every P2 registration figure in this document predates the change and
-  must be re-measured before it is cited.
+  and 5216 B at Kyber512 (Table 5), not the preprint's 2368/1600. `p2_mlwe` now
+  implements this, and every P2 figure in this document is measured on it:
+  registration costs 4,064,437 gas at Kyber768 and 3,788,933 at Kyber512
+  (`bench/results/report_anvil.md`, section 3).
 - **P2's parameter set.** The paper's primary instantiation is Kyber512 with
   Dilithium level 3. Both Kyber512 and Kyber768 are measured.
 - **The 67% figure.** The journal reports "approximately 67%" against

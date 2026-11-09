@@ -95,9 +95,11 @@ whether you are short. Run it again immediately before measuring.
 Where the gas goes, if you need to economise: P2 is by far the largest share
 of the budget, because its meta-address (Mikić et al., JCST 2026, Table 5) is
 5600 bytes and every one of its 176 storage slots (175 data + 1 length) is a
-cold write. The earlier "about 61%" figure was computed for the preprint's
-2368-byte meta-address and no longer applies — re-run the budget estimator
-above for the current figure. P1 is a small fraction.
+cold write: one Kyber768 registration measured 4,064,437 gas on anvil, against
+115,316 for P1 (`bench/results/report_anvil.md`, section 3). An earlier "about
+61%" share was computed for the preprint construction and no longer applies —
+re-run the budget estimator above for the current figure. P1 is a small
+fraction.
 
 **On stranded funds.** Each sample uses a fresh account, and the harness sweeps
 whatever that account did not spend back to the deployer. Without sweeping, a
@@ -200,14 +202,35 @@ exactly on both testnets — a difference of more than a few hundred gas means
 something changed (a different compiler, a different EVM fork, a modified
 contract) and is worth chasing before trusting anything else.
 
-| Protocol | Params | Register | Announce |
+Not exactly, though, and for a known reason. A testnet run has its own run
+label, so it registers different keypairs, and every run encapsulates afresh,
+so no announcement payload repeats. Medians therefore move a little: between
+the last two anvil runs (4276618 and b3dad62) no announcement median moved by
+more than 60 gas, and announcements on the EIP-7623 floor move in steps of 30.
+The ranges below show how far that goes within one run. Figures are from
+`bench/results/report_anvil.md`, section 3, measured at 8483324.
+
+| Registration | Params | Median | Min–max |
 |---|---|---|---|
-| P1 ERC-5564 | secp256k1 | 115,316 | 28,067 |
-| P2 MLWE | mlkem768 | 1,745,670 | 67,730 |
-| P2 MLWE | mlkem512 | 1,194,672 | 54,900 |
-| P3 R1 | mlkem768 | 941,744 | 67,730 |
-| P3 R1 | mlkem512 | 666,246 | 54,930 |
-| P3 R3 | either | 115,264 | — |
+| P1 ERC-6538 | secp256k1 | 115,316 | 115,304–115,316 |
+| P2 MLWE | mlkem768 | 4,064,437 | 4,064,353–4,064,497 |
+| P2 MLWE | mlkem512 | 3,788,933 | 3,788,837–3,789,041 |
+| P3 R1 | mlkem768 | 941,744 | 941,708–941,792 |
+| P3 R1 | mlkem512 | 666,234 | 666,186–666,270 |
+| P3 R2 | mlkem768 | 71,170 | 71,080–71,290 |
+| P3 R2 | mlkem512 | 55,810 | 55,690–55,900 |
+| P3 R3 | mlkem768 | 115,264 | 115,240–115,264 |
+| P3 R3 | mlkem512 | 115,264 | 115,228–115,264 |
+
+| Announcement | Params | Median | Min–max |
+|---|---|---|---|
+| P1, A1 | secp256k1 | 28,067 | 28,043–28,067 |
+| P2, A1 | mlkem768 | 67,700 | 67,670–67,850 |
+| P2, A1 | mlkem512 | 54,960 | 54,870–55,020 |
+| P3, A1 | mlkem768 | 67,760 | 67,460–67,820 |
+| P3, A1 | mlkem512 | 54,900 | 54,780–54,990 |
+| P3, A2 | mlkem768 | 67,000 | 66,850–67,090 |
+| P3, A2 | mlkem512 | 54,230 | 54,050–54,290 |
 
 One legitimate outlier to expect rather than be alarmed by: roughly one R3
 registration in 256 costs about 20,000 gas *less* than the rest. Its payload's
