@@ -24,6 +24,7 @@ GAS_FIELDS = [
     "registry_variant",
     "announcer_variant",
     "gas_used",
+    "floor_bound",
 ]
 
 
@@ -36,7 +37,13 @@ def _write_gas(directory: Path, rows: list[dict[str, object]]) -> None:
 
 
 def _gas_row(
-    protocol: str, operation: str, gas: int, reg: str = "R1", ann: str = "A1", params: str = "p"
+    protocol: str,
+    operation: str,
+    gas: int,
+    reg: str = "R1",
+    ann: str = "A1",
+    params: str = "p",
+    floor: str = "",
 ) -> dict[str, object]:
     return {
         "protocol": protocol,
@@ -45,6 +52,7 @@ def _gas_row(
         "registry_variant": reg,
         "announcer_variant": ann,
         "gas_used": gas,
+        "floor_bound": floor,
     }
 
 
@@ -138,6 +146,74 @@ class TestGasTables:
         )
         text = report.build_report("test")
         assert "2.000M" in text  # k=1 -> registration + one announcement
+
+    def test_each_leg_reports_its_median_and_range(self, results: Path) -> None:
+        """Announcements cannot reproduce, so a median alone would hide by how much."""
+        _write_gas(
+            results,
+            [
+                _gas_row("p2_mlwe", "register", 4_064_437, reg="mlwe_full", floor="False"),
+                _gas_row("p2_mlwe", "announce", 67_670, floor="True"),
+                _gas_row("p2_mlwe", "announce", 67_850, floor="True"),
+                _gas_row("p2_mlwe", "announce", 67_700, floor="True"),
+            ],
+        )
+        section = report.build_report("test").split("## 3. Measured gas", 1)[1]
+        assert "| p2_mlwe | p | A1 | 3 | 67,700 | 67,670–67,850 | calldata floor |" in section
+        assert "| p2_mlwe | p | mlwe_full | 1 | 4,064,437 | 4,064,437–4,064,437 | execution |" in (
+            section
+        )
+
+    def test_legs_shared_by_targets_pool_their_samples(self, results: Path) -> None:
+        """A1 announcements sent after R1 and after R2 are one leg, and n says so."""
+        _write_gas(
+            results,
+            [
+                _gas_row("p3_hybrid", "register", 941_744, reg="R1"),
+                _gas_row("p3_hybrid", "register", 71_170, reg="R2"),
+                _gas_row("p3_hybrid", "announce", 67_760, reg="R1"),
+                _gas_row("p3_hybrid", "announce", 67_730, reg="R2"),
+            ],
+        )
+        section = report.build_report("test").split("## 3. Measured gas", 1)[1]
+        assert "| p3_hybrid | p | A1 | 2 | 67,760 | 67,730–67,760 | — |" in section
+
+    def test_regime_is_unknown_rather_than_guessed(self, results: Path) -> None:
+        """A results file without the floor column must not be labelled either way."""
+        _write_gas(
+            results,
+            [
+                _gas_row("p3_hybrid", "register", 115_264, reg="R3"),
+                _gas_row("p3_hybrid", "announce", 67_000, ann="A2"),
+            ],
+        )
+        section = report.build_report("test").split("## 3. Measured gas", 1)[1]
+        section = section.split("## 4.", 1)[0]
+        assert "calldata floor |" not in section
+        assert "execution |" not in section
+        assert "| 67,000 | 67,000–67,000 | — |" in section
+
+
+class TestMethodology:
+    """What reproduces and what cannot is part of every figure's meaning."""
+
+    def test_states_what_reproduces_and_what_cannot(self, results: Path) -> None:
+        section = report.build_report("test").split("## Methodology", 1)[1]
+        section = section.split("## 1.", 1)[0]
+        assert "Registrations reproduce exactly" in section
+        assert "Announcements do not, and cannot" in section
+        assert "30-gas steps" in section
+        assert "EIP-7623" in section
+        assert "min–max" in section
+
+    def test_uses_the_recorded_sample_count(self, results: Path) -> None:
+        (results / "run_meta_test.json").write_text(json.dumps({"samples_per_target": 20}))
+        section = report.build_report("test").split("## Methodology", 1)[1]
+        assert "sampled 20 times" in section.split("## 1.", 1)[0]
+
+    def test_invents_no_sample_count_without_metadata(self, results: Path) -> None:
+        section = report.build_report("test").split("## Methodology", 1)[1]
+        assert "sampled repeatedly" in section.split("## 1.", 1)[0]
 
 
 class TestOtherSections:

@@ -174,6 +174,95 @@ class TestLoadVariants:
         assert [r["cumulative_gas"] for r in rows] == [100_000, 150_000, 600_000]
 
 
+class TestLoadLegs:
+    """The measured legs every variant is composed from, with their spread."""
+
+    @staticmethod
+    def _write(path: Path, rows: list[tuple[str, str, str, str, str, int, str]]) -> None:
+        with path.open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(
+                [
+                    "protocol",
+                    "param_set",
+                    "operation",
+                    "registry_variant",
+                    "announcer_variant",
+                    "gas_used",
+                    "floor_bound",
+                ]
+            )
+            writer.writerows(rows)
+
+    def test_a_leg_carries_its_count_median_and_range(self, tmp_path: Path) -> None:
+        path = tmp_path / "gas.csv"
+        self._write(
+            path,
+            [
+                ("p3_hybrid", "mlkem768", "announce", "R1", "A1", 67_820, "True"),
+                ("p3_hybrid", "mlkem768", "announce", "R2", "A1", 67_460, "True"),
+                ("p3_hybrid", "mlkem768", "announce", "R1", "A1", 67_760, "True"),
+            ],
+        )
+        (leg,) = curves.load_legs(path)
+        assert (leg.operation, leg.variant, leg.n) == ("announce", "A1", 3)
+        assert (leg.minimum, leg.median, leg.maximum) == (67_460, 67_760, 67_820)
+        assert leg.regime == "calldata floor"
+
+    def test_median_of_an_even_count_is_a_sample_not_an_average(self, tmp_path: Path) -> None:
+        """The upper middle value, so the reported figure is a transaction that was sent."""
+        path = tmp_path / "gas.csv"
+        samples = (28_043, 28_055, 28_067, 28_067)
+        self._write(
+            path,
+            [("p1_erc5564", "secp256k1", "announce", "erc6538", "A1", g, "False") for g in samples],
+        )
+        (leg,) = curves.load_legs(path)
+        # The mean of the two middle samples would be 28,061, which was never sent.
+        assert leg.median == 28_067
+        assert leg.median in leg.samples
+
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [
+            (["True", "True"], "calldata floor"),
+            (["False", "False"], "execution"),
+            (["True", "False"], "mixed"),
+            (["True", ""], "—"),
+            (["", ""], "—"),
+        ],
+    )
+    def test_regime_comes_from_the_floor_column(
+        self, tmp_path: Path, flags: list[str], expected: str
+    ) -> None:
+        path = tmp_path / "gas.csv"
+        self._write(
+            path,
+            [
+                ("p3_hybrid", "mlkem768", "register", "R2", "A1", 71_170 + 30 * i, flag)
+                for i, flag in enumerate(flags)
+            ],
+        )
+        (leg,) = curves.load_legs(path)
+        assert leg.regime == expected
+
+    def test_variants_are_composed_from_the_leg_medians(self, tmp_path: Path) -> None:
+        path = tmp_path / "gas.csv"
+        self._write(
+            path,
+            [
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 115_240, "False"),
+                ("p3_hybrid", "mlkem768", "register", "R3", "A2", 115_264, "False"),
+                ("p3_hybrid", "mlkem768", "announce", "R3", "A2", 66_850, "True"),
+                ("p3_hybrid", "mlkem768", "announce", "R3", "A2", 67_000, "True"),
+            ],
+        )
+        legs = {leg.operation: leg for leg in curves.load_legs(path)}
+        (variant,) = curves.load_variants(path)
+        assert variant.registration_gas == legs["register"].median
+        assert variant.announcement_gas == legs["announce"].median
+
+
 class TestMeasureScan:
     """The scan measurement itself, on a small population for speed."""
 

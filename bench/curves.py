@@ -25,13 +25,93 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["Variant", "crossing", "cumulative", "load_variants"]
+__all__ = ["Leg", "Variant", "crossing", "cumulative", "load_legs", "load_variants"]
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
 #: Payment counts the curve is tabulated at. Dense early, where the crossings
 #: are, and sparse later where the curves are straight lines.
 DEFAULT_POINTS = [0, 1, 2, 5, 10, 20, 31, 50, 100, 200, 500, 1000]
+
+
+@dataclass(frozen=True)
+class Leg:
+    """Every measured sample of one operation: a registry or an announcer variant.
+
+    A leg is what the harness actually sends. A :class:`Variant` composes one
+    registration leg with one announcement leg, so the medians here are the
+    figures every variant is built from.
+    """
+
+    protocol: str
+    param_set: str
+    #: ``"register"`` or ``"announce"``.
+    operation: str
+    #: The registry variant for a registration, the announcer for an announcement.
+    variant: str
+    #: Gas used by each sample, ascending.
+    samples: tuple[int, ...]
+    #: ``"calldata floor"``, ``"execution"``, ``"mixed"``, or ``"—"`` when the
+    #: results file predates the floor column.
+    regime: str
+
+    @property
+    def n(self) -> int:
+        return len(self.samples)
+
+    @property
+    def median(self) -> int:
+        """The upper of the two middle samples for an even count.
+
+        Never an average, so the median is always a transaction that was sent.
+        """
+        return self.samples[len(self.samples) // 2]
+
+    @property
+    def minimum(self) -> int:
+        return self.samples[0]
+
+    @property
+    def maximum(self) -> int:
+        return self.samples[-1]
+
+
+def _regime(flags: list[str]) -> str:
+    """Which cost model charged every sample of a leg, from the harness's column.
+
+    Anything but a complete column of ``True``/``False`` is reported as unknown
+    rather than guessed at.
+    """
+    distinct = set(flags)
+    if not distinct or not distinct <= {"True", "False"}:
+        return "—"
+    if distinct == {"True"}:
+        return "calldata floor"
+    if distinct == {"False"}:
+        return "execution"
+    return "mixed"
+
+
+def load_legs(path: Path) -> list[Leg]:
+    """Group a measured results file into legs, one per operation and variant."""
+    samples: dict[tuple[str, str, str, str], list[int]] = {}
+    floor_flags: dict[tuple[str, str, str, str], list[str]] = {}
+
+    with path.open() as handle:
+        for row in csv.DictReader(handle):
+            if not row.get("gas_used"):
+                continue
+            if row["operation"] == "register":
+                key = (row["protocol"], row["param_set"], "register", row["registry_variant"])
+            else:
+                key = (row["protocol"], row["param_set"], "announce", row["announcer_variant"])
+            samples.setdefault(key, []).append(int(row["gas_used"]))
+            floor_flags.setdefault(key, []).append(row.get("floor_bound") or "")
+
+    return [
+        Leg(*key, samples=tuple(sorted(values)), regime=_regime(floor_flags[key]))
+        for key, values in sorted(samples.items())
+    ]
 
 
 @dataclass(frozen=True)
@@ -62,39 +142,25 @@ def load_variants(path: Path) -> list[Variant]:
     Registration and announcement are independent transactions, so a registry
     variant and an announcer variant compose into a configuration even when the
     harness never sent that exact pair. This takes the median of each measured
-    leg and crosses them.
+    leg (:attr:`Leg.median`) and crosses them.
     """
-    registrations: dict[tuple[str, str, str], list[int]] = {}
-    announcements: dict[tuple[str, str, str], list[int]] = {}
-
-    with path.open() as handle:
-        for row in csv.DictReader(handle):
-            if not row.get("gas_used"):
-                continue
-            gas = int(row["gas_used"])
-            key_base = (row["protocol"], row["param_set"])
-            if row["operation"] == "register":
-                registrations.setdefault((*key_base, row["registry_variant"]), []).append(gas)
-            else:
-                announcements.setdefault((*key_base, row["announcer_variant"]), []).append(gas)
-
-    def median(values: list[int]) -> int:
-        values.sort()
-        return values[len(values) // 2]
+    legs = load_legs(path)
+    registrations = [leg for leg in legs if leg.operation == "register"]
+    announcements = [leg for leg in legs if leg.operation == "announce"]
 
     variants: list[Variant] = []
-    for (protocol, params, reg_variant), reg_values in sorted(registrations.items()):
-        for (ann_protocol, ann_params, ann_variant), ann_values in sorted(announcements.items()):
-            if (ann_protocol, ann_params) != (protocol, params):
+    for reg in registrations:
+        for ann in announcements:
+            if (ann.protocol, ann.param_set) != (reg.protocol, reg.param_set):
                 continue
             variants.append(
                 Variant(
-                    protocol=protocol,
-                    param_set=params,
-                    registry_variant=reg_variant,
-                    announcer_variant=ann_variant,
-                    registration_gas=median(reg_values),
-                    announcement_gas=median(ann_values),
+                    protocol=reg.protocol,
+                    param_set=reg.param_set,
+                    registry_variant=reg.variant,
+                    announcer_variant=ann.variant,
+                    registration_gas=reg.median,
+                    announcement_gas=ann.median,
                 )
             )
     return variants

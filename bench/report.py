@@ -21,10 +21,10 @@ import csv
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from bench.anonymity import DEPLOYED_DESIGN, PRE_FIX_DESIGN, TAG_DESIGNS
-from bench.curves import Variant, load_variants
+from bench.curves import Leg, Variant, load_legs, load_variants
 from bench.sizes import git_commit
 
 __all__ = ["build_report"]
@@ -291,17 +291,83 @@ def _sizes_table() -> str:
     return "\n".join(lines)
 
 
-def _gas_table(variants: list[Variant]) -> str:
+#: Protocol order for the per-leg tables, the same narrative order as above.
+_PROTOCOL_ORDER: Final[dict[str, int]] = {"p1_erc5564": 0, "p2_mlwe": 1, "p3_hybrid": 2}
+
+
+def _leg_order(leg: Leg) -> tuple[int, int, str, str]:
+    return (
+        _PROTOCOL_ORDER.get(leg.protocol, 99),
+        _NARRATIVE_ORDER.get((leg.protocol, leg.variant), 99),
+        leg.param_set,
+        leg.variant,
+    )
+
+
+def _leg_table(legs: list[Leg], operation: str) -> str:
+    """One row per measured leg: what the harness sent, not a composed variant.
+
+    The range is reported beside the median because announcements cannot
+    reproduce from run to run, and a median alone would hide by how much.
+    """
+    column = "Registry" if operation == "register" else "Announcer"
     lines = [
-        "| Protocol | Params | Registry | Announcer | Registration | Announcement |",
-        "|---|---|---|---|---|---|",
+        f"| Protocol | Params | {column} | n | Median | Min–max | Regime |",
+        "|---|---|---|---|---|---|---|",
     ]
-    for v in sorted(variants, key=_order):
+    for leg in sorted((leg for leg in legs if leg.operation == operation), key=_leg_order):
         lines.append(
-            f"| {v.protocol} | {v.param_set} | {v.registry_variant} | {v.announcer_variant} "
-            f"| {v.registration_gas:,} | {v.announcement_gas:,} |"
+            f"| {leg.protocol} | {leg.param_set} | {leg.variant} | {leg.n} "
+            f"| {leg.median:,} | {leg.minimum:,}–{leg.maximum:,} | {leg.regime} |"
         )
     return "\n".join(lines)
+
+
+def _gas_tables(legs: list[Leg]) -> str:
+    return "\n".join(
+        [
+            "**Registration**",
+            "",
+            _leg_table(legs, "register"),
+            "",
+            "**Announcement**",
+            "",
+            _leg_table(legs, "announce"),
+        ]
+    )
+
+
+def _methodology(meta: dict[str, Any] | None) -> str:
+    """What reproduces, what cannot, and why the figures are medians with ranges."""
+    samples = meta.get("samples_per_target") if meta else None
+    sampled = f"sampled {samples} times" if samples else "sampled repeatedly"
+    return "\n".join(
+        [
+            f"Every target is {sampled}. A sample is a fresh keypair registered from a "
+            "fresh EOA, then one announcement to it. Only first registrations are "
+            "measured, so every storage slot written is cold. A leg that several "
+            "targets share pools their samples, which is why some legs have a larger n.",
+            "",
+            "**Registrations reproduce exactly.** Each keypair is derived from the seed "
+            "recorded in its row, so a run under the same label sends byte-identical "
+            "registrations, and gas units are deterministic: the same gas, row for row. "
+            "A registration's range is between keypairs within a run, never between runs.",
+            "",
+            "**Announcements do not, and cannot.** Encapsulation, and P1's ephemeral "
+            "key, draw fresh randomness on every run, so every payload is new. A "
+            "transaction on the EIP-7623 calldata floor costs exactly 21,000 gas plus "
+            "10 per calldata token, where a zero byte is one token and a non-zero byte "
+            "four. Each zero byte that a pseudorandom payload happens to contain takes "
+            "30 gas off, so a floor-bound announcement moves in 30-gas steps, from sample "
+            "to sample and from run to run. Above the floor, a zero calldata byte saves "
+            "12 gas instead (4 against 16).",
+            "",
+            "**Every gas figure is therefore a median, reported with its min–max** in "
+            "section 3. For an even n the median is the upper of the two middle samples, "
+            "so it is always a transaction that was actually sent. Sections 1, 4 and 5 "
+            "compose one registration median with one announcement median.",
+        ]
+    )
 
 
 def _crossover_table(variants: list[Variant]) -> str:
@@ -398,12 +464,19 @@ def _anonymity_table() -> str:
     return "\n".join(lines)
 
 
-def _provenance(network: str) -> str:
+def _run_meta(network: str) -> dict[str, Any] | None:
     meta_path = RESULTS_DIR / f"run_meta_{network}.json"
     if not meta_path.exists():
+        return None
+    meta: dict[str, Any] = json.loads(meta_path.read_text())
+    return meta
+
+
+def _provenance(network: str) -> str:
+    meta = _run_meta(network)
+    if meta is None:
         return f"_No run metadata for {network}._"
 
-    meta = json.loads(meta_path.read_text())
     kem = meta.get("kem_backend", {})
     machine = meta.get("machine", {})
     measured_at = str(meta.get("git_commit", "unknown"))
@@ -429,6 +502,7 @@ def build_report(network: str) -> str:
     """Assemble the full Markdown report."""
     gas_path = RESULTS_DIR / f"gas_{network}.csv"
     variants = load_variants(gas_path) if gas_path.exists() else []
+    legs = load_legs(gas_path) if gas_path.exists() else []
 
     caveat = ""
     if network == "anvil":
@@ -450,6 +524,10 @@ def build_report(network: str) -> str:
             "",
             _provenance(network),
             "",
+            "## Methodology",
+            "",
+            _methodology(_run_meta(network)),
+            "",
             "## 1. The three protocols, head to head",
             "",
             "P2 and P3 are both shown at ML-KEM-768, so a security-level difference "
@@ -467,10 +545,12 @@ def build_report(network: str) -> str:
             "",
             "## 3. Measured gas",
             "",
-            "Medians over 20 fresh keypairs and 20 fresh EOAs per variant. First "
-            "registrations only, so every storage slot written is cold.",
+            "One row per measured leg, which is what the harness actually sent. n is "
+            "the pooled sample count. Regime says whether the EIP-7623 calldata floor "
+            "or execution set the price. Methodology explains why announcements range "
+            "and registrations reproduce.",
             "",
-            _gas_table(variants) if variants else "_No gas measurements yet._",
+            _gas_tables(legs) if legs else "_No gas measurements yet._",
             "",
             "## 4. Cost ratios and crossover",
             "",
