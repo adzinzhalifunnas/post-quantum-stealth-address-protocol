@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
@@ -491,11 +492,74 @@ def _provenance(network: str) -> str:
         f"- Measurement timestamp: {meta.get('timestamp')}",
     ]
     if measured_at[:12] != git_commit()[:12]:
-        lines.append(
-            "- ⚠️ The working tree has moved on since these numbers were taken. "
-            "Re-run `bench.gas` before quoting them if any contract changed."
-        )
+        lines.append(_drift_since(measured_at))
     return "\n".join(lines)
+
+
+#: What cannot change a gas measurement: results and deployment records, prose,
+#: tests, and the analysis modules that bench.gas never imports. Every other path
+#: counts as able to, so an unknown file errs towards a warning.
+_INERT_PREFIXES: Final[tuple[str, ...]] = ("bench/results/", "broadcast/", "docs/")
+_INERT_SUFFIXES: Final[tuple[str, ...]] = (".md", ".t.sol")
+_ANALYSIS_ONLY: Final[frozenset[str]] = frozenset(
+    {"bench/anonymity.py", "bench/curves.py", "bench/report.py", "bench/scan.py"}
+)
+
+
+def _can_change_gas(path: str) -> bool:
+    return not (
+        path.startswith(_INERT_PREFIXES)
+        or path.endswith(_INERT_SUFFIXES)
+        or "/tests/" in f"/{path}"
+        or path in _ANALYSIS_ONLY
+    )
+
+
+def _files_changed_since(commit: str) -> list[str] | None:
+    """Tracked paths that differ between `commit` and this tree, or None if git cannot say."""
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", commit],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=Path(__file__).parent.parent,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return [line for line in out.splitlines() if line]
+
+
+def _drift_since(measured_at: str) -> str:
+    """Say what changed after the measurement, by name, rather than that something did.
+
+    A report is always generated at least one commit after the run it reads,
+    because the run's results are committed first. A bare "the tree has moved
+    on" would therefore fire on every report and mean nothing.
+    """
+    changed = _files_changed_since(measured_at)
+    if changed is None:
+        return (
+            "- ⚠️ The working tree has moved on since these numbers were taken, and git "
+            "cannot compare it with the measured commit. Re-run `bench.gas` before quoting "
+            "them if any contract changed."
+        )
+    can_change = [path for path in changed if _can_change_gas(path)]
+    if can_change:
+        shown = ", ".join(f"`{path}`" for path in can_change[:6])
+        more = f" and {len(can_change) - 6} more" if len(can_change) > 6 else ""
+        return (
+            "- ⚠️ The working tree has moved on since these numbers were taken, and files "
+            f"that can change gas differ: {shown}{more}. Re-run `bench.gas` before quoting "
+            "them."
+        )
+    if not changed:
+        return f"- No tracked file has changed since `{measured_at[:12]}`."
+    files = "1 file has" if len(changed) == 1 else f"{len(changed)} files have"
+    return (
+        f"- Since `{measured_at[:12]}`, {files} changed, none of which can change gas: "
+        "results, deployment records, documentation, tests and analysis code only."
+    )
 
 
 def build_report(network: str) -> str:

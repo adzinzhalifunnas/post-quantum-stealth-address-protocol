@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from bench import report
+from bench.sizes import git_commit
 
 GAS_FIELDS = [
     "protocol",
@@ -316,6 +317,95 @@ class TestOtherSections:
         text = report.build_report("test")
         assert "Measured at commit" in text
         assert "working tree has moved on" in text
+
+    @staticmethod
+    def _measured_elsewhere(
+        results: Path, monkeypatch: pytest.MonkeyPatch, changed: list[str]
+    ) -> str:
+        """A report generated at a later commit than its measurement."""
+        (results / "run_meta_test.json").write_text(
+            json.dumps({"network": "test", "git_commit": "1" * 40, "samples_per_target": 20})
+        )
+        monkeypatch.setattr(report, "git_commit", lambda: "2" * 40)
+        monkeypatch.setattr(report, "_files_changed_since", lambda commit: changed)
+        return report.build_report("test").split("## Provenance", 1)[1].split("## Methodology")[0]
+
+    def test_provenance_names_files_that_can_change_gas(
+        self, results: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        section = self._measured_elsewhere(
+            results,
+            monkeypatch,
+            ["p3_hybrid/contracts/RegistryCommit.sol", "docs/findings.md"],
+        )
+        assert "working tree has moved on" in section
+        assert "`p3_hybrid/contracts/RegistryCommit.sol`" in section
+        assert "findings.md" not in section
+
+    def test_provenance_clears_changes_that_cannot_change_gas(
+        self, results: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Results are committed before the report, so this is the usual case."""
+        section = self._measured_elsewhere(
+            results,
+            monkeypatch,
+            [
+                "bench/results/gas_anvil.csv",
+                "broadcast/Deploy.s.sol/31337/run-latest.json",
+                "docs/findings.md",
+                "CLAUDE.md",
+                "bench/report.py",
+                "p3_hybrid/tests/test_p3_roundtrip.py",
+                "p3_hybrid/contracts/RegistryCommit.t.sol",
+            ],
+        )
+        assert "moved on" not in section
+        assert "7 files have changed, none of which can change gas" in section
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "p3_hybrid/contracts/RegistryCommit.sol",
+            "shared/contracts/StealthAnnouncer.sol",
+            "script/Deploy.s.sol",
+            "p3_hybrid/scheme.py",
+            "shared/pqsap_core/derive.py",
+            "bench/gas.py",
+            "bench/sizes.py",
+            "foundry.toml",
+            "pyproject.toml",
+            "uv.lock",
+            "a/file/nobody/classified.txt",
+        ],
+    )
+    def test_anything_not_known_to_be_inert_can_change_gas(self, path: str) -> None:
+        assert report._can_change_gas(path)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "bench/results/gas_anvil.csv",
+            "broadcast/Deploy.s.sol/31337/run-latest.json",
+            "docs/threat-model.md",
+            "README.md",
+            "p2_mlwe/NOTES.md",
+            "bench/tests/test_report.py",
+            "shared/pqsap_core/tests/test_derive.py",
+            "shared/contracts/StealthAnnouncer.t.sol",
+            "bench/report.py",
+            "bench/curves.py",
+            "bench/scan.py",
+            "bench/anonymity.py",
+        ],
+    )
+    def test_results_prose_tests_and_analysis_cannot(self, path: str) -> None:
+        assert not report._can_change_gas(path)
+
+    def test_git_compares_this_tree_with_a_real_commit(self) -> None:
+        head = git_commit()
+        if head == "unknown":
+            pytest.skip("not a git checkout")
+        assert isinstance(report._files_changed_since(head), list)
 
 
 class TestCaveats:
