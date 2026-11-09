@@ -117,9 +117,12 @@ be computed from `h_j`. See `docs/threat-model.md`, Q1.
 
 **The address check is mandatory.** FIPS 203 uses implicit rejection, so
 `Decaps` never fails — a foreign ciphertext returns 32 pseudorandom bytes and
-therefore a well-formed-looking tag. Measured over 20,000 foreign announcements,
-77 passed the view tag against 78 expected for a uniform 8-bit filter. Every one
-of those would have been wrongly accepted on the tag alone.
+therefore a well-formed-looking tag. Under the pre-fix `h[0]` tag, 77 of 20,000
+foreign announcements passed the view tag against 78 expected for a uniform 8-bit
+filter (an uncommitted spike script, 2026-08-07). Under the deployed
+domain-separated tag, `bench.scan` counts 30 of 7,980 against 31.2 expected
+(`bench/results/scan.csv`). Every one of those would have been wrongly accepted
+on the tag alone.
 
 `scan` verifies as `addr(M + h*G)` rather than `addr(p*G)`. The two are the same
 point, but only the first is computable from public spending material, which is

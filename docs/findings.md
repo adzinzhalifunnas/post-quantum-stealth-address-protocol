@@ -289,9 +289,15 @@ one-word slip would have produced plausible, wrong, undetectable results. Closed
 by asserting liboqs reports `FIPS203` and by interoperating with an independent
 pure-Python implementation in both directions.
 
-**FIPS 203 implicit rejection, measured.** Over 20,000 foreign announcements, 77
-passed the view tag against 78 expected for a uniform 8-bit filter. All 77 would
-have been wrongly accepted on the tag alone. Direct evidence that the mandatory
+**FIPS 203 implicit rejection, measured.** Under the **pre-fix** `h[0]` tag, 77
+of 20,000 foreign announcements passed the view tag against 78 expected for a
+uniform 8-bit filter. That count came from an inline script during the P3 spike
+(2026-08-07) that was never committed, so it cannot be re-run as it stood. Under
+the deployed domain-separated tag, `bench.scan` counts 30 of 7,980 foreign
+announcements passing against 31.2 expected: its four P3 configurations make 12,
+13, 10 and 15 address checks, five of each for the planted payments
+(`bench/results/scan.csv`, measured at 84e512b). Every one of them would have
+been wrongly accepted on the tag alone. Direct evidence that the mandatory
 address check is load-bearing rather than defensive.
 
 **ML-KEM key generation is reproducible.** liboqs 0.16 exposes derandomised
