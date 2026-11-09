@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
+from bench.anonymity import DEPLOYED_DESIGN, PRE_FIX_DESIGN, TAG_DESIGNS
 from bench.curves import Variant, load_variants
 from bench.sizes import git_commit
 
@@ -70,7 +71,12 @@ _QUALITATIVE: Final[list[tuple[str, str, str, str]]] = [
     ("Resists harvest-now-decrypt-later", "no", "yes", "yes"),
     ("Spendable on unmodified EVM", "yes", "**no**", "yes"),
     ("Dual-key separation (view ≠ spend)", "yes", "yes", "yes"),
-    ("Quantum leak once an address spends", "total", "none", "partial (Q1)"),
+    (
+        "Quantum leak once an address spends",
+        "total",
+        "none",
+        "none (pre-fix h[0] tag: partial, Q1)",
+    ),
     (
         "Off-chain availability dependency",
         "none",
@@ -347,22 +353,47 @@ def _scan_table() -> str:
 
 
 def _anonymity_table() -> str:
-    rows = [r for r in _read_csv(RESULTS_DIR / "anonymity.csv") if r["tag_bits"] == "8"]
+    rows = _read_csv(RESULTS_DIR / "anonymity.csv")
     if not rows:
         return "_No anonymity simulation yet. Run `bench.anonymity`._"
 
+    # Both designs at the deployed width, keyed by registry size. A file written
+    # before the tag was domain-separated has no design column; it describes one
+    # design only and is reported as stale rather than guessed at.
+    by_design: dict[str, dict[str, dict[str, str]]] = {d: {} for d in TAG_DESIGNS}
+    for r in rows:
+        if r.get("tag_design") in by_design and r["tag_bits"] == "8":
+            by_design[r["tag_design"]][r["registry_size"]] = r
+    if not all(by_design.values()):
+        return (
+            "_The anonymity simulation predates the domain-separated view tag and "
+            "covers one design only. Re-run `bench.anonymity`._"
+        )
+
+    pre_fix, deployed = by_design[PRE_FIX_DESIGN], by_design[DEPLOYED_DESIGN]
     lines = [
         "Anonymity set for a **spent** P3 address under a quantum adversary "
-        "(ECDLP broken, ML-KEM intact), at the deployed 8-bit view tag:",
+        "(ECDLP broken, ML-KEM intact), at the deployed 8-bit view tag width. "
+        "P3 deploys the domain-separated tag, which the adversary cannot evaluate; "
+        "the h[0] columns are the **pre-fix design**, kept for comparison.",
         "",
-        "| Registry size | Expected set | Mean (simulated) | Uniquely identified |",
-        "|---|---|---|---|",
+        "| Registry size | h[0] tag (pre-fix): expected set | Mean (simulated) "
+        "| Uniquely identified | Domain-separated tag (deployed): mean set "
+        "| Uniquely identified |",
+        "|---|---|---|---|---|---|",
     ]
-    for r in rows:
+    for size in sorted(pre_fix, key=int):
+        old, new = pre_fix[size], deployed.get(size)
+        new_cells = (
+            f"{float(new['mean_set_size']):,.2f} "
+            f"| {float(new['fraction_deanonymised']) * 100:.1f}%"
+            if new
+            else "— | —"
+        )
         lines.append(
-            f"| {int(r['registry_size']):,} | {float(r['expected_set_size']):,.2f} "
-            f"| {float(r['mean_set_size']):,.2f} "
-            f"| {float(r['fraction_deanonymised']) * 100:.1f}% |"
+            f"| {int(size):,} | {float(old['expected_set_size']):,.2f} "
+            f"| {float(old['mean_set_size']):,.2f} "
+            f"| {float(old['fraction_deanonymised']) * 100:.1f}% | {new_cells} |"
         )
     return "\n".join(lines)
 

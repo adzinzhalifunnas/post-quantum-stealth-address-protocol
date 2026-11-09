@@ -24,7 +24,10 @@ turn a shared secret into an Ethereum address through this one module. They
 differ in how they *agree* a secret; they must not differ in what they do with
 it. A protocol deriving addresses its own way would not be comparable, so the
 canonical rules are fixed here once: keccak256, view tag = digest byte 0, tweak
-scalar = same digest mod n, and rejection of both `h == 0` and `p == 0`.
+scalar = same digest mod n, and rejection of both `h == 0` and `p == 0`. The one
+exception is P3's view tag, which comes from its own domain-separated digest of
+the shared secret so that it reveals nothing about `h` (see below); P3's `h` is
+derived exactly as everyone else's.
 
 **`shared/contracts/StealthAnnouncer.sol` — the control variable.** A faithful
 port of ERC-5564's reference announcer, used by all three protocols.
@@ -94,15 +97,23 @@ no `sys.path` manipulation. Dependency direction is one-way: protocols import
 
 ```
 Sender:     (ct, S) = Encaps(ek_view)
-            h, tag  = keccak256(S)
+            h       = keccak256(S) mod n
+            tag     = keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0]
             P       = M + h*G
             announce(ct, addr(P), tag)
 
-Recipient:  S      = Decaps(dk_view, ct)
-            h, tag = keccak256(S)
-            tag must match, then addr(M + h*G) must match
+Recipient:  S   = Decaps(dk_view, ct)
+            tag must equal keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0]
+            h   = keccak256(S) mod n
+            addr(M + h*G) must match
             p = (m + h) mod n
 ```
+
+**The view tag is domain-separated from `h`.** With ERC-5564's `tag = h[0]`, a
+quantum adversary who recovers `h_j` for every registrant from a spent address
+can check each against the published tag and shrink the anonymity set to about
+1 + (N−1)/256. Hashing `S` under its own domain takes that away: the tag cannot
+be computed from `h_j`. See `docs/threat-model.md`, Q1.
 
 **The address check is mandatory.** FIPS 203 uses implicit rejection, so
 `Decaps` never fails — a foreign ciphertext returns 32 pseudorandom bytes and

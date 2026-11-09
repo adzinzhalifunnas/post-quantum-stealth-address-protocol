@@ -208,26 +208,31 @@ numbers are not comparable and should not be presented as though they were.
 
 ---
 
-## 7. Q1 — the view-tag leak, quantified
+## 7. Q1 — the view-tag leak, quantified and closed
 
 A quantum adversary with ECDLP broken and ML-KEM intact, against a **spent** P3
-address. Anonymity set = 1 + Binomial(N−1, 2⁻⁸):
+address. Under the **pre-fix design**, where P3's tag was ERC-5564's `h[0]`, the
+anonymity set was 1 + Binomial(N−1, 2⁻⁸). P3 now domain-separates its tag —
+`keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0]`, with `h` unchanged — and the
+adversary, who holds `h_j` but never `S`, cannot evaluate it:
 
-| Registry size | Mean set | Uniquely identified |
-|---|---|---|
-| 100 | 1.4 | **66.6%** |
-| 1,000 | 4.9 | 1.8% |
-| 10,000 | 39.9 | 0.0% |
-| 1,000,000 | 3,906 | 0.0% |
+| Registry size | h[0] tag (pre-fix): mean set | Uniquely identified | Domain-separated (deployed): set | Uniquely identified |
+|---|---|---|---|---|
+| 100 | 1.4 | **66.6%** | 100 | 0.0% |
+| 1,000 | 4.9 | 1.8% | 1,000 | 0.0% |
+| 10,000 | 39.9 | 0.0% | 10,000 | 0.0% |
+| 1,000,000 | 3,906 | 0.0% | 1,000,000 | 0.0% |
 
-Simulation agrees with the closed form within 10% at every size, each checking
-the other.
+For the pre-fix design, simulation agrees with the closed form within 10% at
+every size, each checking the other.
 
-The leak scales the right way: **dangerous precisely for a small deployment**,
-negligible for a large one. Three qualifications belong with any statement of
-it — only spent addresses leak; P1 is worse off, not better, being fully broken
-against the same adversary; and removing the tag closes the leak at the cost of
-an elliptic-curve operation on every announcement rather than one in 256.
+The pre-fix leak scaled the right way: **dangerous precisely for a small
+deployment**, negligible for a large one. Domain separation closes it at every
+size without dropping the tag — the earlier mitigation, which would have cost an
+elliptic-curve operation on every announcement during scanning rather than one
+in 256. Only spent addresses were ever exposed, and P1 is unaffected and still
+worse off, being fully broken against the same adversary. Argued analysis plus
+simulation, not a proof; see `docs/threat-model.md`, Q1.
 
 ---
 
@@ -308,8 +313,9 @@ For the contribution section, stated conservatively:
 3. **A commitment-based registry reaching parity with ERC-5564**, requiring no
    contract change.
 4. **A quantified analysis of the view-tag leak** against a quantum adversary for
-   a hybrid construction — argued analysis plus simulation, explicitly not a
-   formal proof.
+   a hybrid construction, and a domain-separated tag that closes it without
+   changing the announcement size or the scan's hash count — argued analysis
+   plus simulation, explicitly not a formal proof.
 5. **A concrete demonstration that MLWE SAP cannot complete an EVM payment**,
    rather than a citation of the claim.
 

@@ -212,40 +212,88 @@ class TestMeasureScan:
 
 
 class TestAnonymity:
+    PRE = anonymity.PRE_FIX_DESIGN
+    DEPLOYED = anonymity.DEPLOYED_DESIGN
+
     def test_no_tag_leaves_the_whole_registry_anonymous(self) -> None:
-        assert anonymity.expected_set_size(1000, 0) == 1000.0
+        assert anonymity.expected_set_size(1000, 0, tag_design=self.PRE) == 1000.0
 
     def test_eight_bit_tag_divides_by_256(self) -> None:
-        assert anonymity.expected_set_size(1000, 8) == pytest.approx(1 + 999 / 256)
+        assert anonymity.expected_set_size(1000, 8, tag_design=self.PRE) == pytest.approx(
+            1 + 999 / 256
+        )
 
     def test_recipient_is_always_in_their_own_anonymity_set(self) -> None:
         """The set can never be empty: the true recipient always matches."""
-        assert anonymity.expected_set_size(1, 8) == 1.0
-        row = anonymity.simulate(1, 8, trials=50)
+        assert anonymity.expected_set_size(1, 8, tag_design=self.PRE) == 1.0
+        row = anonymity.simulate(1, 8, trials=50, tag_design=self.PRE)
         assert row.median_set_size == 1
 
     def test_simulation_agrees_with_the_closed_form(self) -> None:
         """Independent check: if these disagree, one of them is wrong."""
         for size in (100, 1_000, 10_000):
-            row = anonymity.simulate(size, 8, trials=3000)
+            row = anonymity.simulate(size, 8, trials=3000, tag_design=self.PRE)
             assert row.mean_set_size == pytest.approx(row.expected_set_size, rel=0.10)
 
     def test_simulation_is_reproducible(self) -> None:
         """A thesis table must regenerate byte-for-byte."""
-        assert anonymity.simulate(1000, 8, trials=200) == anonymity.simulate(1000, 8, trials=200)
+        for design in anonymity.TAG_DESIGNS:
+            assert anonymity.simulate(1000, 8, trials=200, tag_design=design) == (
+                anonymity.simulate(1000, 8, trials=200, tag_design=design)
+            )
 
     def test_small_registries_are_the_dangerous_case(self) -> None:
-        """The leak is worst where there are fewest users to hide among."""
-        small = anonymity.simulate(100, 8, trials=2000)
-        large = anonymity.simulate(1_000_000, 8, trials=200)
+        """The pre-fix leak was worst where there are fewest users to hide among."""
+        small = anonymity.simulate(100, 8, trials=2000, tag_design=self.PRE)
+        large = anonymity.simulate(1_000_000, 8, trials=200, tag_design=self.PRE)
         assert small.fraction_deanonymised > 0.5
         assert large.fraction_deanonymised == 0.0
         assert large.mean_set_size > small.mean_set_size
 
     def test_wider_tags_leak_more(self) -> None:
-        sizes = [anonymity.expected_set_size(10_000, bits) for bits in (0, 4, 8, 12, 16)]
+        sizes = [
+            anonymity.expected_set_size(10_000, bits, tag_design=self.PRE)
+            for bits in (0, 4, 8, 12, 16)
+        ]
         assert sizes == sorted(sizes, reverse=True)
 
     def test_empty_registry_is_refused(self) -> None:
-        with pytest.raises(ValueError, match="at least the recipient"):
-            anonymity.expected_set_size(0, 8)
+        for design in anonymity.TAG_DESIGNS:
+            with pytest.raises(ValueError, match="at least the recipient"):
+                anonymity.expected_set_size(0, 8, tag_design=design)
+
+    def test_unknown_design_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="unknown tag design"):
+            anonymity.expected_set_size(100, 8, tag_design="h[0]")
+
+    def test_only_the_pre_fix_tag_is_evaluable_by_the_adversary(self) -> None:
+        assert anonymity.adversary_can_evaluate_tag(self.PRE)
+        assert not anonymity.adversary_can_evaluate_tag(self.DEPLOYED)
+
+    def test_domain_separated_tag_leaves_the_whole_registry(self) -> None:
+        """Q1 closed: every registrant stays a candidate, at every size and width."""
+        for size in (2, 100, 1_000_000):
+            for bits in anonymity.DEFAULT_TAG_BITS:
+                assert anonymity.expected_set_size(size, bits, tag_design=self.DEPLOYED) == size
+                row = anonymity.simulate(size, bits, trials=50, tag_design=self.DEPLOYED)
+                assert row.mean_set_size == row.median_set_size == row.max_set_size == size
+                assert row.fraction_deanonymised == 0.0
+
+    def test_the_fix_is_what_closes_the_small_registry_leak(self) -> None:
+        """Same registry, same tag width: only the design differs."""
+        pre = anonymity.simulate(100, 8, trials=2000, tag_design=self.PRE)
+        fixed = anonymity.simulate(100, 8, trials=2000, tag_design=self.DEPLOYED)
+        assert pre.fraction_deanonymised > 0.5
+        assert fixed.fraction_deanonymised == 0.0
+        assert fixed.mean_set_size == 100
+
+    def test_pre_fix_rows_are_unchanged_by_adding_the_deployed_design(self) -> None:
+        """The seed ignores the design, so the earlier table still regenerates."""
+        rows = anonymity.run([100, 1_000], [0, 8], trials=300)
+        pre = [r for r in rows if r.tag_design == self.PRE]
+        assert pre == [
+            anonymity.simulate(size, bits, trials=300, tag_design=self.PRE)
+            for size in (100, 1_000)
+            for bits in (0, 8)
+        ]
+        assert len(rows) == 2 * len(pre)

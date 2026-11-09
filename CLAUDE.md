@@ -146,16 +146,28 @@ Recipient holds secp256k1 spending pair (m, M = mG) and an ML-KEM pair
 (dk_view, ek_view).
 
     Sender:     (ct, S) = Encaps(ek_view)
-                h = keccak256(S);  P = M + h*G;  tag = h[0]
+                h = keccak256(S);  P = M + h*G
+                tag = keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0]
                 announce(ct, addr(P), tag)
 
     Recipient:  for each announcement:
                   S_i = Decaps(dk_view, ct_i)      # never fails, see below
+                  if keccak256("pq-sap/p3/view-tag/v1" ‖ S_i)[0] != tag_i: continue
                   h_i = keccak256(S_i)
-                  if h_i[0] != tag_i: continue
                   p = (m + h_i) mod n
                   if addr(p*G) != announced_addr: continue   # MANDATORY
                   -> match
+
+**The view tag is domain-separated from h — P3 only.** An earlier revision
+used `tag = h[0]`, ERC-5564's rule. That is exactly the Q1 leak: a quantum
+adversary who takes `h_j = dlog(P − M_j)` from a spent address can evaluate
+`h_j[0]` for every registrant and filter the anonymity set to ~N/256. A tag
+hashed from `S` under its own domain cannot be evaluated from `h_j`, so the
+anonymity set stays N. `h`, `P` and the one-byte tag size are unchanged, and
+scanning still costs one hash per announcement. P1 keeps the ERC-5564 rule
+(tag = byte 0 of the h digest); P2 is unchanged. `derive.h_scalar_and_tag` is
+untouched; the P3 tag comes from `derive.domain_separated_view_tag`. Analysis
+and both designs' numbers: `docs/threat-model.md`, Q1.
 
 **The final address check is not optional.** FIPS 203 uses implicit
 rejection: Decaps never errors — on a foreign ciphertext it returns 32

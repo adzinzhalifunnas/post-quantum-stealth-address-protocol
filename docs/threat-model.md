@@ -47,7 +47,7 @@ viewing key.
 |---|---|---|---|---|
 | P1 ERC-5564 | unlinkable | **broken later** | broken | broken |
 | P2 MLWE | unlinkable | unlinkable | unlinkable | unlinkable |
-| P3 hybrid | unlinkable | unlinkable | unlinkable | **partial leak** |
+| P3 hybrid | unlinkable | unlinkable | unlinkable | unlinkable (pre-fix h[0] tag: **partial leak**) |
 
 **P1 fails against A3 and A4.** Its shared secret is an ECDH product of two
 published values, `R` and `M_view`. An adversary who can take discrete logs
@@ -60,10 +60,11 @@ stealth key is a lattice element, so no EVM account corresponds to it. That is
 demonstrated concretely by `NotEvmSpendable`, not merely asserted; see
 `p2_mlwe/NOTES.md`.
 
-**P3 resists A1, A3, and A4 for unspent addresses**, and leaks partially once an
-address spends. That leak is Q1 and is quantified below.
+**P3 resists A1, A3, and A4, spent or unspent.** Before its view tag was
+domain-separated it leaked partially once an address spent. That leak is Q1,
+quantified below for both designs.
 
-## Q1 — the view-tag leak on spent P3 addresses
+## Q1 — the view tag on spent P3 addresses
 
 While a P3 stealth address only receives, the chain shows an address, and
 addresses are hashes: A4 has nothing to take a discrete log of. When it spends,
@@ -71,31 +72,54 @@ its ECDSA signature reveals the public key `P`, and A4 can compute
 `h_j = dlog(P − M_j)` for every registered `M_j`.
 
 On its own that reveals nothing, because *every* candidate yields a valid
-discrete log. The leak comes from the view tag: A4 derives each candidate's tag
-and keeps only those matching the published one. The true recipient always
-survives; each other registrant survives with probability 2⁻ᵗ.
+discrete log. Whether anything leaks depends entirely on whether `h_j` lets A4
+check a candidate against the announcement — and the only candidate-specific
+value an announcement publishes is the view tag.
 
-Simulated in `bench/anonymity.py`, at the deployed 8-bit tag:
+**Pre-fix design: `tag = h[0]`.** P3 originally took its tag from byte 0 of
+`keccak256(S)`, the same digest `h` is read from, as ERC-5564 does. Holding
+`h_j`, A4 had every candidate's tag for free and kept only those matching the
+published one. The true recipient always survives; each other registrant
+survives with probability 2⁻ᵗ, leaving about 1 + (N−1)/2ᵗ.
 
-| Registry size | Mean anonymity set | Uniquely identified |
-|---|---|---|
-| 100 | 1.4 | 66.6% |
-| 1,000 | 4.9 | 1.8% |
-| 10,000 | 39.9 | 0.0% |
-| 1,000,000 | 3,906 | 0.0% |
+**Deployed design: `tag = keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0]`.** `h` is
+unchanged. The tag is now a function of `S`, not of `h`. A4 holds
+`h_j = keccak256(S) mod n`, which does not invert, and `S` itself is protected by
+ML-KEM, which A4 has not broken. A4 cannot evaluate any candidate's tag, so the
+tag filters nothing and the anonymity set is the whole registry — at every
+registry size and every tag width.
 
-The leak is real, bounded, and scales the right way — worst for a small
-registry, negligible for a large one. Three qualifications belong beside any
-statement of it:
+Simulated in `bench/anonymity.py`, at the deployed 8-bit tag width:
 
-1. **Only spent addresses leak.** In a payment workload most stealth addresses
-   are unspent at any moment, and those are untouched.
-2. **P1 is worse off, not better.** Against A4 it is fully broken, tag or no
-   tag. P3's partial leak is an improvement on the standard, not a regression
-   from it.
-3. **The tag is not free to remove.** Dropping it closes the leak and forces an
-   elliptic-curve operation on every announcement during scanning rather than on
-   one in 256. That is a measurable cost — see `bench/scan.py`.
+| Registry size | h[0] tag (pre-fix): mean set | Uniquely identified | Domain-separated (deployed): set | Uniquely identified |
+|---|---|---|---|---|
+| 100 | 1.4 | 66.6% | 100 | 0.0% |
+| 1,000 | 4.9 | 1.8% | 1,000 | 0.0% |
+| 10,000 | 39.9 | 0.0% | 10,000 | 0.0% |
+| 1,000,000 | 3,906 | 0.0% | 1,000,000 | 0.0% |
+
+The pre-fix leak was real, bounded, and scaled the right way — worst for a small
+registry, negligible for a large one. The fix removes it at every size. It costs
+nothing in announcement size, since the tag is still one byte, and nothing in
+scanning: a recipient still spends one hash per announcement on the tag, and
+computes `h` only for the roughly 1 in 256 that pass.
+
+Four qualifications belong beside any statement of it:
+
+1. **Only spent addresses were ever exposed.** In a payment workload most
+   stealth addresses are unspent at any moment, and those were untouched under
+   either design.
+2. **P1 is worse off, and unchanged.** It keeps the ERC-5564 `h[0]` tag, as the
+   standard requires, and against A4 it is fully broken regardless of the tag:
+   the ECDH secret falls to a discrete log.
+3. **P3's tag rule now deviates from ERC-5564's.** The standard specifies the
+   tag only for scheme id 1, and P3's id is non-standard already, but any
+   implementation must use P3's rule or it will find no payments.
+4. **The closure rests on assumptions.** That ML-KEM keeps `S` from A4, and that
+   keccak256 under two domains behaves as two independent functions, so `h_j`
+   says nothing about the tag. The earlier mitigation — dropping the tag, at the
+   cost of an elliptic-curve operation on every announcement during scanning —
+   is no longer needed.
 
 This is argued analysis plus simulation, per the charter's bounded scope. It is
 not a formal proof and must not be cited as one.

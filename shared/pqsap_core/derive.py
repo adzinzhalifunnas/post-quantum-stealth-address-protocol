@@ -10,9 +10,13 @@ Canonical rules, fixed here once and relied on by all three schemes:
 * The digest is ``keccak256`` of the shared secret. Not SHA-256, not SHA3-256
   — Ethereum's keccak256, the same primitive the EVM exposes.
 * The **view tag** is byte 0 of the raw 32-byte digest, matching ERC-5564.
+  P1 and P2 use exactly this rule. P3 is the one exception: its tag comes from
+  a separate, domain-separated digest (:func:`domain_separated_view_tag`), so
+  the tag reveals nothing about ``h``. See docs/threat-model.md, Q1, for why.
 * The **tweak scalar** ``h`` is that same digest read as a big-endian integer
-  and reduced mod n. Sender and recipient derive both values from one digest,
-  so the reduction can never desynchronise them.
+  and reduced mod n — for every protocol, P3 included. Sender and recipient
+  derive both values from one digest, so the reduction can never desynchronise
+  them.
 * ``h == 0`` and ``p == 0`` are rejected. Both are negligible in probability
   and both are checked anyway: ``h == 0`` would give ``P = M``, publishing the
   recipient's own spending key as the stealth address and destroying the
@@ -32,6 +36,7 @@ __all__ = [
     "DeriveError",
     "derive_stealth_privkey",
     "derive_stealth_pubkey",
+    "domain_separated_view_tag",
     "eth_address",
     "h_scalar_and_tag",
     "keccak256",
@@ -75,6 +80,27 @@ def h_scalar_and_tag(shared_secret: bytes) -> tuple[int, int]:
     if h == 0:
         raise DeriveError("tweak scalar h is zero; stealth address would equal the meta-address")
     return h, tag
+
+
+def domain_separated_view_tag(shared_secret: bytes, domain: bytes) -> int:
+    """View tag from its own digest of the shared secret: ``keccak256(domain ‖ S)[0]``.
+
+    The ERC-5564 tag is a byte of the very digest ``h`` is read from, so anyone
+    who learns ``h`` can compute the tag. Once a stealth address spends, a
+    quantum adversary learns a candidate ``h_j`` for every registered recipient,
+    and the tag then filters those candidates. A tag computed under a separate domain is a function
+    of ``S`` alone: knowing ``h = keccak256(S)`` does not give it, because
+    keccak256 does not invert and ``S`` is protected by the KEM.
+
+    ``h`` is unaffected; it still comes from :func:`h_scalar_and_tag`.
+
+    Raises:
+        DeriveError: if ``domain`` is empty, which would silently reproduce the
+            ERC-5564 tag and with it the leak this function exists to close.
+    """
+    if not domain:
+        raise DeriveError("a domain-separated view tag needs a non-empty domain")
+    return keccak256(domain + shared_secret)[0]
 
 
 def derive_stealth_pubkey(spend_pub33: bytes, h: int) -> bytes:

@@ -4,14 +4,28 @@ The recipient holds a secp256k1 spending pair ``(m, M)`` and an ML-KEM viewing
 pair ``(dk_view, ek_view)``::
 
     Sender:     (ct, S) = Encaps(ek_view)
-                h, tag  = keccak256(S)
+                h       = keccak256(S) mod n
+                tag     = keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0]
                 P       = M + h*G
                 announce(ct, addr(P), tag)
 
-    Recipient:  S  = Decaps(dk_view, ct)
-                h, tag = keccak256(S)
-                tag must match, then addr(M + h*G) must match
+    Recipient:  S   = Decaps(dk_view, ct)
+                tag must equal keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0]
+                h   = keccak256(S) mod n
+                addr(M + h*G) must match
                 p = (m + h) mod n
+
+**The view tag is domain-separated from h.** ERC-5564 takes the tag from byte
+0 of the digest ``h`` is read from, and P3 originally did the same. That leaks
+under a quantum adversary: once a stealth address spends, its signature reveals
+``P``, the adversary takes ``h_j = dlog(P - M_j)`` for every registered ``M_j``,
+and each ``h_j`` predicts a tag — so the published tag filters the candidates to
+about 1 + (N-1)/256. Hashing ``S`` under its own domain makes the tag a function
+of ``S`` alone. The adversary holds ``h_j``, never ``S``, so it cannot evaluate
+any candidate's tag and the anonymity set stays the whole registry. ``h`` and
+the stealth address are unchanged, the tag is still one byte, and scanning still
+costs one hash per announcement. See docs/threat-model.md, Q1. P1 keeps the
+ERC-5564 rule, as the standard requires; this deviation is P3's alone.
 
 Only the *unlinkability* is post-quantum; custody remains ECDSA. That is a
 deliberate scope decision, not an oversight. Stealth addresses are ordinary
@@ -51,12 +65,17 @@ from pqsap_core.scheme import (
     ViewingKeys,
 )
 
-__all__ = ["P3_SCHEME_ID", "P3Hybrid"]
+__all__ = ["P3_SCHEME_ID", "P3_VIEW_TAG_DOMAIN", "P3Hybrid"]
 
 #: ASCII "PQ3H". ERC-5564 standardises id 1 for secp256k1 and registers nothing
 #: else; this id is therefore non-standard by necessity, and the thesis
 #: methodology says so explicitly.
 P3_SCHEME_ID: Final[int] = 0x50513348
+
+#: Domain for P3's view tag, ``keccak256(P3_VIEW_TAG_DOMAIN ‖ S)[0]``. Versioned,
+#: because a deployed tag rule can only ever be replaced, never edited: every
+#: announcement already published was tagged under the old one.
+P3_VIEW_TAG_DOMAIN: Final[bytes] = b"pq-sap/p3/view-tag/v1"
 
 _SPEND_PUBKEY_BYTES: Final[int] = 33
 
@@ -121,13 +140,15 @@ class P3Hybrid(StealthScheme):
     def announce(self, meta: MetaAddress) -> Announcement:
         spend_pub, ek_view = self.split_meta(meta)
         ct, shared = kem.encaps(self.spec, ek_view)
-        h, tag = derive.h_scalar_and_tag(shared)
+        # h exactly as every protocol derives it. The digest byte that comes
+        # back with it is the ERC-5564 tag, which P3 deliberately does not use.
+        h, _ = derive.h_scalar_and_tag(shared)
         stealth_pub = derive.derive_stealth_pubkey(spend_pub, h)
         return Announcement(
             scheme_id=self.scheme_id,
             payload=ct,
             stealth_address=derive.eth_address(stealth_pub),
-            view_tag=tag,
+            view_tag=derive.domain_separated_view_tag(shared, P3_VIEW_TAG_DOMAIN),
         )
 
     def scan(self, keys: ViewingKeys, announcements: Sequence[Announcement]) -> list[ScanMatch]:
@@ -142,13 +163,16 @@ class P3Hybrid(StealthScheme):
             # Never raises: implicit rejection returns pseudorandom bytes for a
             # ciphertext that was not ours.
             shared = kem.decaps(self.spec, dk_view, ann.payload)
-            try:
-                h, tag = derive.h_scalar_and_tag(shared)
-            except DeriveError:
-                continue
 
             # Cheap probabilistic filter first — this is what the view tag buys.
-            if tag != ann.view_tag:
+            # One hash per announcement, as before the tag was domain-separated;
+            # h is only computed for the roughly 1 in 256 that pass.
+            if derive.domain_separated_view_tag(shared, P3_VIEW_TAG_DOMAIN) != ann.view_tag:
+                continue
+
+            try:
+                h, _ = derive.h_scalar_and_tag(shared)
+            except DeriveError:
                 continue
 
             # Mandatory. Roughly 1 in 256 foreign announcements reaches here.

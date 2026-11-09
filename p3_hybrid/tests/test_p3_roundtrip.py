@@ -31,10 +31,14 @@ from pqsap_core import derive, kem, testing
 from pqsap_core.derive import SECP256K1_N, DeriveError
 from pqsap_core.scheme import Announcement, MetaAddress, ScanMatch
 
-from p3_hybrid.scheme import P3Hybrid
+from p3_hybrid.scheme import P3_VIEW_TAG_DOMAIN, P3Hybrid
 
 SAMPLES = 20
 TAG_COLLISION_ATTEMPTS = 10_000
+
+#: Written out rather than imported, so the test pins the rule itself and a
+#: silent edit to the constant cannot pass unnoticed.
+VIEW_TAG_DOMAIN_V1 = b"pq-sap/p3/view-tag/v1"
 
 
 @pytest.fixture(scope="module")
@@ -156,9 +160,10 @@ def test_colliding_tag_rejected_by_address_check(scheme: P3Hybrid) -> None:
         announcement = scheme.announce(stranger.meta)
 
         shared = kem.decaps(scheme.spec, viewing.view_secret, announcement.payload)
-        h, tag = derive.h_scalar_and_tag(shared)
+        tag = derive.domain_separated_view_tag(shared, P3_VIEW_TAG_DOMAIN)
         if tag != announcement.view_tag:
             continue
+        h, _ = derive.h_scalar_and_tag(shared)
 
         # The cheap filter has passed on an announcement that is not ours.
         assert tag == announcement.view_tag
@@ -182,6 +187,57 @@ def test_colliding_tag_rejected_by_address_check(scheme: P3Hybrid) -> None:
     )
 
 
+def test_view_tag_is_byte_0_of_the_domain_separated_digest(scheme: P3Hybrid) -> None:
+    """Pin the rule: tag = keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0].
+
+    The recipient recomputes S from the ciphertext, so this checks what the
+    sender published against what a scanner must derive, byte for byte.
+    """
+    assert P3_VIEW_TAG_DOMAIN == VIEW_TAG_DOMAIN_V1
+    keys = scheme.keygen()
+    for _ in range(SAMPLES):
+        announcement = scheme.announce(keys.meta)
+        shared = kem.decaps(scheme.spec, keys.view_secret, announcement.payload)
+        assert announcement.view_tag == derive.keccak256(VIEW_TAG_DOMAIN_V1 + shared)[0]
+
+
+def test_h_is_unchanged_by_the_tag_change(scheme: P3Hybrid) -> None:
+    """Only the tag moved. h, and therefore every stealth address, is as before."""
+    keys = scheme.keygen()
+    spend_pub, _ = scheme.split_meta(keys.meta)
+    for _ in range(SAMPLES):
+        announcement = scheme.announce(keys.meta)
+        shared = kem.decaps(scheme.spec, keys.view_secret, announcement.payload)
+        h = int.from_bytes(derive.keccak256(shared), "big") % SECP256K1_N
+
+        (match,) = scheme.scan(scheme.viewing_keys(keys), [announcement])
+        assert match.tweak == h
+        assert derive.eth_address(derive.derive_stealth_pubkey(spend_pub, h)) == (
+            announcement.stealth_address
+        )
+
+
+def test_knowing_h_does_not_predict_the_tag(scheme: P3Hybrid) -> None:
+    """Q1: the h[0] rule no longer predicts the published tag.
+
+    A quantum adversary recovers h for every candidate from a spent address.
+    Under the pre-fix design the true recipient's h[0] equalled the tag every
+    time, which is what made the tag a filter. Now it agrees about 1 time in
+    256 — chance, the same rate as any stranger — so h carries no tag
+    information. 512 trials expect 2 agreements; 20 or more has probability
+    below 10^-13 for an independent tag.
+    """
+    keys = scheme.keygen()
+    agreements = 0
+    for _ in range(512):
+        announcement = scheme.announce(keys.meta)
+        (match,) = scheme.scan(scheme.viewing_keys(keys), [announcement])
+        assert match.tweak is not None
+        if match.tweak.to_bytes(32, "big")[0] == announcement.view_tag:
+            agreements += 1
+    assert agreements < 20
+
+
 def test_dual_key_separation(scheme: P3Hybrid) -> None:
     """A holder of viewing keys enumerates every payment and can spend none.
 
@@ -192,9 +248,9 @@ def test_dual_key_separation(scheme: P3Hybrid) -> None:
     testing.check_dual_key_separation(scheme)
 
     # P3-specific: the tweak h is fully known to a viewer, and is still useless
-    # without the spending scalar m. This is the property Q1 examines — a
-    # quantum adversary who recovers h from a *spent* address learns linkage,
-    # never custody.
+    # without the spending scalar m. Q1 examines the converse — a quantum
+    # adversary recovers a candidate h for every registrant from a *spent*
+    # address, and because the tag is domain-separated it cannot confirm any.
     keys = scheme.keygen()
     announcement = scheme.announce(keys.meta)
     match = scheme.scan(scheme.viewing_keys(keys), [announcement])[0]

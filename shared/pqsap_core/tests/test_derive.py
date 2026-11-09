@@ -81,6 +81,25 @@ def test_tag_is_first_digest_byte() -> None:
         assert 0 <= tag <= 0xFF
 
 
+def test_domain_separated_tag_is_first_byte_of_prefixed_digest() -> None:
+    """Pin the second rule: keccak256(domain ‖ S)[0], with h left untouched."""
+    domain = b"pq-sap/p3/view-tag/v1"
+    for _ in range(SAMPLES):
+        secret = os.urandom(32)
+        tag = derive.domain_separated_view_tag(secret, domain)
+        assert tag == derive.keccak256(domain + secret)[0]
+        assert 0 <= tag <= 0xFF
+        # The scalar still comes from the undomained digest.
+        h, _ = derive.h_scalar_and_tag(secret)
+        assert h == int.from_bytes(derive.keccak256(secret), "big") % SECP256K1_N
+
+
+def test_domain_separated_tag_refuses_an_empty_domain() -> None:
+    """An empty domain would quietly reproduce the ERC-5564 tag, and its leak."""
+    with pytest.raises(DeriveError, match="non-empty domain"):
+        derive.domain_separated_view_tag(os.urandom(32), b"")
+
+
 def test_h_zero_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """h == 0 would make P == M, publishing the recipient's own key as the
     stealth address. Vanishingly unlikely, still refused."""

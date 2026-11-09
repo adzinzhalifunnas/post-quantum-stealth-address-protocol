@@ -169,40 +169,60 @@ class TestOtherSections:
         assert "29.28" in text
         assert "1,284" in text
 
-    def test_anonymity_section_reports_only_the_deployed_tag(self, results: Path) -> None:
+    @staticmethod
+    def _write_anonymity(results: Path, rows: list[dict[str, str]]) -> None:
         with (results / "anonymity.csv").open("w", newline="") as handle:
-            writer = csv.DictWriter(
-                handle,
-                fieldnames=[
-                    "registry_size",
-                    "tag_bits",
-                    "expected_set_size",
-                    "mean_set_size",
-                    "fraction_deanonymised",
-                ],
-            )
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
             writer.writeheader()
-            writer.writerow(
-                {
-                    "registry_size": "100",
-                    "tag_bits": "8",
-                    "expected_set_size": "1.39",
-                    "mean_set_size": "1.41",
-                    "fraction_deanonymised": "0.666",
-                }
-            )
-            writer.writerow(
-                {
-                    "registry_size": "100",
-                    "tag_bits": "16",
-                    "expected_set_size": "1.0",
-                    "mean_set_size": "1.0",
-                    "fraction_deanonymised": "0.998",
-                }
-            )
+            writer.writerows(rows)
+
+    @staticmethod
+    def _anonymity_row(design: str, bits: str, mean: str, unique: str) -> dict[str, str]:
+        return {
+            "tag_design": design,
+            "registry_size": "100",
+            "tag_bits": bits,
+            "expected_set_size": mean,
+            "mean_set_size": mean,
+            "fraction_deanonymised": unique,
+        }
+
+    def test_anonymity_section_reports_only_the_deployed_tag(self, results: Path) -> None:
+        self._write_anonymity(
+            results,
+            [
+                self._anonymity_row("h0", "8", "1.41", "0.666"),
+                self._anonymity_row("h0", "16", "1.0", "0.998"),
+                self._anonymity_row("domain_separated", "8", "100.0", "0.0"),
+            ],
+        )
         text = report.build_report("test")
         assert "66.6%" in text
         assert "99.8%" not in text  # the 16-bit row is not the deployed tag
+
+    def test_anonymity_section_shows_both_designs_and_labels_the_old_one(
+        self, results: Path
+    ) -> None:
+        """The deployed design and the pre-fix one, never one mistaken for the other."""
+        self._write_anonymity(
+            results,
+            [
+                self._anonymity_row("h0", "8", "1.41", "0.666"),
+                self._anonymity_row("domain_separated", "8", "100.0", "0.0"),
+            ],
+        )
+        section = report.build_report("test").split("(Q1)", 1)[1]
+        assert "pre-fix design" in section
+        assert "| 100 | 1.41 | 1.41 | 66.6% | 100.00 | 0.0% |" in section
+
+    def test_anonymity_file_from_before_the_fix_is_reported_as_stale(self, results: Path) -> None:
+        """A one-design file cannot say which design it measured; never guess."""
+        row = self._anonymity_row("h0", "8", "1.41", "0.666")
+        del row["tag_design"]
+        self._write_anonymity(results, [row])
+        text = report.build_report("test")
+        assert "predates the domain-separated view tag" in text
+        assert "66.6%" not in text
 
     def test_provenance_warns_when_measurement_predates_the_tree(self, results: Path) -> None:
         """A stale measurement must announce itself, not be quietly quoted."""
