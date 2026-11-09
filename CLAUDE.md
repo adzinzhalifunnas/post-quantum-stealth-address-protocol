@@ -239,16 +239,23 @@ compression: Kyber ciphertexts are pseudorandom and incompressible.
 
 ## Open questions — quantify, don't assume
 
-**Q1 — view tag leaks under a quantum adversary.** Once a P3 stealth
-address *spends*, its ECDSA signature reveals P. A quantum adversary (ECDLP
-broken, ML-KEM intact) computes h_j = dlog(P − M_j) for every registered
-M_j. Every candidate yields *a* valid dlog, so with no view tag they learn
-nothing; a t-bit tag filters to ~N/2^t. Unspent addresses stay fully
-unlinkable. This leak is specific to P3 — P2 does not have it, since its
-stealth key is also lattice. Unanalysed in the literature. **Bounded
-scope:** argued analysis plus a simple numerical simulation of
-anonymity-set size. Not a formal proof — that would eat the implementation
-budget.
+**Q1 — view tag leaks under a quantum adversary. Closed by domain
+separation; the pre-fix analysis stays as the comparison.** Once a P3
+stealth address *spends*, its ECDSA signature reveals P. A quantum
+adversary (ECDLP broken, ML-KEM intact) computes h_j = dlog(P − M_j) for
+every registered M_j. Every candidate yields *a* valid dlog, so with no view
+tag they learn nothing. Under the **pre-fix design**, tag = h[0], the
+adversary can evaluate every candidate's tag, and a t-bit tag filters to
+~1 + (N−1)/2^t: at N = 100 and 8 bits, 66.6% of spent addresses are
+uniquely identified (`bench/results/anonymity.csv`). **The deployed tag
+closes it:** keccak256("pq-sap/p3/view-tag/v1" ‖ S)[0] is a function of S
+alone, which the adversary never holds, so the anonymity set stays N.
+Unspent addresses were always fully unlinkable. The leak was specific to
+P3 — P2 does not have it, since its stealth key is also lattice.
+Unanalysed in the literature. **Bounded scope:** argued analysis plus a
+simple numerical simulation of anonymity-set size, under both designs. Not
+a formal proof — that would eat the implementation budget. Numbers and
+qualifications: `docs/threat-model.md`, Q1.
 
 **Q2 — where does cost live, and when does it move?** Registration is the
 largest single cost but announcements recur. Excluding the 21k base tx:
