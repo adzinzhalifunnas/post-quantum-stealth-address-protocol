@@ -165,7 +165,7 @@ uv run pytest && forge test
 ```bash
 anvil &
 forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast --private-key <anvil key>
-uv run python -m bench.gas --network anvil --samples 20
+uv run python -m bench.gas --network anvil --samples 20 --run-label r2
 ```
 
 Then `bench.scan`, `bench.curves`, `bench.anonymity`, and `bench.report`.

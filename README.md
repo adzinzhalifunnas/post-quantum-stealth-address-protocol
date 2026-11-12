@@ -32,8 +32,8 @@ including EIP-7623. These files are committed and never hand-edited.
 |---|---|
 | `gas_anvil.csv` | One row per measured transaction: git commit, chain, block, protocol, operation, variant, seed, payload size and digest, calldata tokens, EIP-7623 floor, gas used, transaction hash |
 | `receipts_anvil.jsonl` | Transaction receipts of the measured transactions |
-| `run_meta_anvil.json` | Run metadata: commit, network, samples per target, KEM backend, machine, solc version, optimizer runs |
-| `sizes.csv` | Key, ciphertext, and meta-address sizes |
+| `run_meta_anvil.json` | Run metadata: commit, network, samples per target, KEM backend with the ML-KEM key and ciphertext sizes, machine, solc version, optimizer runs |
+| `sizes.csv` | Meta-address and announcement sizes, storage slots, and predicted storage and data gas per protocol |
 | `curves_anvil.csv`, `curves_anvil.png` | Cumulative cost against the number of payments |
 | `scan.csv` | Off-chain scanning measurements |
 | `anonymity.csv` | View-tag anonymity-set simulation |
@@ -48,7 +48,7 @@ To regenerate the results on a local node (see [Running](#running) for starting
 Anvil and deploying):
 
 ```bash
-uv run python -m bench.gas --network anvil --samples 20
+uv run python -m bench.gas --network anvil --samples 20 --run-label r2
 uv run python -m bench.sizes
 uv run python -m bench.curves
 uv run python -m bench.anonymity
